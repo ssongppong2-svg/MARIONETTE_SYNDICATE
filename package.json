@@ -1,12 +1,12 @@
 {
-  "name": "fragment",
+  "name": "nudge",
   "version": "0.1.0",
   "private": true,
-  "description": "검은 세계 속 흰 파편 — 중1 힘 단원을 비튼 물리 퍼즐 데모",
+  "description": "약한 마우스 포인터로 중1 힘 개념을 엮어 벽을 부수는 물리 퍼즐",
   "scripts": {
-    "test": "node tests/physics.test.js && node tests/fragment.test.js",
+    "test": "node tests/physics.test.js && node tests/nudge.test.js",
     "test:physics": "node tests/physics.test.js",
-    "test:fragment": "node tests/fragment.test.js",
+    "test:nudge": "node tests/nudge.test.js",
     "build": "node tools/build.js",
     "start": "npx --yes serve ."
   },

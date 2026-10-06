@@ -38,9 +38,10 @@
       return m.area > 1e-12 ? { area: m.area, centroid: m.centroid } : null;
     }
     apply(world) {
+      if (this.surface <= this.y0 + 1e-6) return; // empty basin
       const g = world.gravity;
       for (const b of world.bodies) {
-        if (!b.isDynamic) continue;
+        if (!b.isDynamic || b.noBuoyancy) continue;
         const bb = b.aabb;
         if (bb.minY > this.surface || bb.maxX < this.x0 || bb.minX > this.x1) continue;
         let total = 0;
