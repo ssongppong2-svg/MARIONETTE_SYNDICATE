@@ -2,7 +2,7 @@
 /*
  * Bundles index.html, styles.css and every local script into one HTML file.
  *
- *   node tools/build.js                 → dist/force-chamber.html (standalone page)
+ *   node tools/build.js                 → dist/fragment.html (standalone page)
  *   node tools/build.js --fragment out  → page body without the document skeleton,
  *                                          for hosts that wrap the page themselves
  */
@@ -16,9 +16,12 @@ const fragmentIdx = args.indexOf('--fragment');
 const fragmentOut = fragmentIdx >= 0 ? args[fragmentIdx + 1] : null;
 
 const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
-const css = fs.readFileSync(path.join(ROOT, 'styles.css'), 'utf8');
-
-let out = html.replace(/<link rel="stylesheet" href="styles\.css">/, () => `<style>\n${css}\n</style>`);
+const cssPath = path.join(ROOT, 'styles.css');
+let out = html;
+if (fs.existsSync(cssPath)) {
+  const css = fs.readFileSync(cssPath, 'utf8');
+  out = out.replace(/<link rel="stylesheet" href="styles\.css">/, () => `<style>\n${css}\n</style>`);
+}
 out = out.replace(/<script src="([^"]+)"><\/script>/g, (m, src) => {
   if (/^https?:/.test(src)) return m;
   const code = fs.readFileSync(path.join(ROOT, src), 'utf8').replace(/<\/script/gi, '<\\/script');
@@ -38,7 +41,7 @@ if (fragmentOut) {
 } else {
   const dist = path.join(ROOT, 'dist');
   fs.mkdirSync(dist, { recursive: true });
-  const file = path.join(dist, 'force-chamber.html');
+  const file = path.join(dist, 'fragment.html');
   fs.writeFileSync(file, out);
   console.log('standalone →', path.relative(ROOT, file), `(${(out.length / 1024).toFixed(0)} KB)`);
 }

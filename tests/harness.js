@@ -1,6 +1,6 @@
 /*
  * Loads the game's browser scripts into Node for headless tests.
- * Script order comes from index.html; DOM-bound layers (render/ui/main) are skipped.
+ * Script order comes from index.html; DOM-bound layers (view/input/audio/main) are skipped.
  */
 'use strict';
 const fs = require('fs');
@@ -28,7 +28,7 @@ function scriptList() {
   while ((m = re.exec(html))) {
     const src = m[1];
     if (/^https?:/.test(src)) continue;
-    if (/^src\/(ui|render)\//.test(src) || src === 'src/main.js') continue;
+    if (/(^|\/)main\.js$/.test(src) || /\/(view|input|audio)\.js$/.test(src)) continue;
     out.push(src);
   }
   return out.length ? out : ENGINE_ONLY;

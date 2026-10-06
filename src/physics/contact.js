@@ -17,7 +17,8 @@
   const STICK_SPEED = 0.01; // m/s — below this, static friction applies
 
   class Arbiter {
-    constructor(sa, sb) {
+    /** mix: 'sqrt' (geometric mean, default) or 'min' (the smoother surface wins). */
+    constructor(sa, sb, mix = 'sqrt') {
       this.sa = sa;
       this.sb = sb;
       this.a = sa.body;
@@ -25,8 +26,14 @@
       this.contacts = [];
       this.normal = new Vec2(0, 1);
       const ma = sa.material, mb = sb.material;
-      this.mus = Math.sqrt(ma.mu * mb.mu);
-      this.muk = Math.sqrt((ma.muk != null ? ma.muk : ma.mu) * (mb.muk != null ? mb.muk : mb.mu));
+      const kA = ma.muk != null ? ma.muk : ma.mu, kB = mb.muk != null ? mb.muk : mb.mu;
+      if (mix === 'min') {
+        this.mus = Math.min(ma.mu, mb.mu);
+        this.muk = Math.min(kA, kB);
+      } else {
+        this.mus = Math.sqrt(ma.mu * mb.mu);
+        this.muk = Math.sqrt(kA * kB);
+      }
       this.e = Math.min(ma.e, mb.e);
       this.surfaceSpeed = sb.surfaceSpeed - sa.surfaceSpeed;
       this.stamp = 0;

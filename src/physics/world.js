@@ -83,6 +83,7 @@
       this.dt = 1 / 240;
       this.onBreak = null;
       this.onImpact = null;
+      this.frictionMix = opts.frictionMix || 'sqrt';
     }
 
     add(body) {
@@ -149,7 +150,7 @@
               const key = s1.id + ':' + s2.id;
               let arb = this.arbiters.get(key);
               if (!arb) {
-                arb = new Arbiter(s1, s2);
+                arb = new Arbiter(s1, s2, this.frictionMix);
                 this.arbiters.set(key, arb);
               } else {
                 arb.fresh = false;
@@ -173,6 +174,8 @@
         b.prevAngle = b.angle;
         b.constrained = 0;
         b.buoyancy = null;
+        b.wetPrev = b.wet || 0; // wetted fraction during the previous step
+        b.wet = 0;
       }
 
       this.collide();
@@ -229,7 +232,6 @@
         b.force.set(0, 0);
         b.torque = 0;
         b.extForce = false;
-        b.wet = 0;
         b.updateTransform();
       }
 
