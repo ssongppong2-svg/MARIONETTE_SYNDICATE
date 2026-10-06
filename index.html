@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Force Chamber</title>
+  <meta name="description" content="힘과 기하로 여는 물리 방탈출. 챕터 1 보정 구역: 중력을 재고, 마찰을 재고, 두 줄의 장력으로 문을 연다.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=B612+Mono:wght@400;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <button class="wordmark" id="home-btn" type="button" aria-label="타이틀 화면">
+        <span><span class="vec">F</span>ORCE CHAMBER</span><small>힘의 격실</small>
+      </button>
+      <div class="chamber-chip" id="chamber-chip"></div>
+      <div class="spacer"></div>
+      <div class="stopwatch" id="stopwatch" title="이 격실에서 보낸 시간"></div>
+      <nav class="top-actions" aria-label="게임 메뉴">
+        <button class="icon-btn" id="btn-brief" type="button" title="브리핑 다시 보기"><span data-icon="brief"></span><span class="lbl">브리핑</span></button>
+        <button class="icon-btn" id="btn-notebook" type="button" title="실험 노트"><span data-icon="notebook"></span><span class="lbl">노트</span></button>
+        <button class="icon-btn" id="btn-map" type="button" title="격실 목록"><span data-icon="map"></span><span class="lbl">격실</span></button>
+        <button class="icon-btn" id="btn-settings" type="button" title="설정"><span data-icon="settings"></span><span class="lbl">설정</span></button>
+      </nav>
+    </header>
+    <main class="stage">
+      <section class="viewport" aria-label="실험 격실">
+        <canvas id="view" aria-label="격실 시뮬레이션 화면"></canvas>
+        <div class="toasts" id="toasts" aria-live="polite"></div>
+        <div class="hud-corner">
+          <div class="sim-clock" id="sim-clock">t = 0.000 s</div>
+          <div class="legend" id="force-legend" hidden></div>
+        </div>
+        <div class="toolbar" id="toolbar" role="toolbar" aria-label="실험 도구"></div>
+      </section>
+      <aside class="panel" id="panel" aria-label="조작 패널"></aside>
+    </main>
+  </div>
+  <div class="modal" id="modal" hidden></div>
+  <div class="title-screen" id="title-screen" hidden></div>
+
+  <script src="src/core/math.js"></script>
+  <script src="src/core/geometry.js"></script>
+  <script src="src/physics/body.js"></script>
+  <script src="src/physics/collide.js"></script>
+  <script src="src/physics/contact.js"></script>
+  <script src="src/physics/joints.js"></script>
+  <script src="src/physics/world.js"></script>
+  <script src="src/game/save.js"></script>
+  <script src="src/game/devices.js"></script>
+  <script src="src/game/room.js"></script>
+  <script src="src/game/game.js"></script>
+  <script src="src/render/renderer.js"></script>
+  <script src="src/render/scene.js"></script>
+  <script src="src/ui/sound.js"></script>
+  <script src="src/ui/icons.js"></script>
+  <script src="src/ui/ui.js"></script>
+  <script src="src/ui/input.js"></script>
+  <script src="src/rooms/kit.js"></script>
+  <script src="src/rooms/c01-freefall.js"></script>
+  <script src="src/rooms/c02-incline.js"></script>
+  <script src="src/rooms/c03-tension.js"></script>
+  <script src="src/rooms/roadmap.js"></script>
+  <script src="src/main.js"></script>
+</body>
+</html>

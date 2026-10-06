@@ -1,0 +1,14 @@
+{
+  "name": "force-chamber",
+  "version": "0.1.0",
+  "private": true,
+  "description": "힘과 기하로 여는 물리 방탈출 퍼즐 게임 — 챕터 1: 보정 구역",
+  "scripts": {
+    "test": "node tests/physics.test.js && node tests/rooms.test.js",
+    "test:physics": "node tests/physics.test.js",
+    "test:rooms": "node tests/rooms.test.js",
+    "build": "node tools/build.js",
+    "start": "npx --yes serve ."
+  },
+  "license": "UNLICENSED"
+}
