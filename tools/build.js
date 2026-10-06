@@ -2,7 +2,7 @@
 /*
  * Bundles index.html, styles.css and every local script into one HTML file.
  *
- *   node tools/build.js                 → dist/nudge.html (standalone page)
+ *   node tools/build.js                 → dist/sigma.html (standalone page)
  *   node tools/build.js --fragment out  → page body without the document skeleton,
  *                                          for hosts that wrap the page themselves
  */
@@ -41,7 +41,7 @@ if (fragmentOut) {
 } else {
   const dist = path.join(ROOT, 'dist');
   fs.mkdirSync(dist, { recursive: true });
-  const file = path.join(dist, 'nudge.html');
+  const file = path.join(dist, 'sigma.html');
   fs.writeFileSync(file, out);
   console.log('standalone →', path.relative(ROOT, file), `(${(out.length / 1024).toFixed(0)} KB)`);
 }

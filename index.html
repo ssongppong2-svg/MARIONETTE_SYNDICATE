@@ -3,16 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Nudge</title>
-  <meta name="description" content="힘이 약한 마우스 포인터 하나로 중력·부력·마찰력·탄성력을 엮어 분홍 벽을 무너뜨리는 물리 퍼즐.">
+  <title>ΣF</title>
+  <meta name="description" content="최대 360 N의 견인줄 하나로 마찰력·부력·탄성력·무게·합력을 엮어 금고를 여는, 수치가 넘쳐나는 물리 퍼즐.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap">
   <style>
-    :root { color-scheme: light; }
-    html, body { margin: 0; height: 100%; background: #fdf0f5; overflow: hidden; overscroll-behavior: none; }
+    :root { color-scheme: dark; --bg: #03060a; }
+    html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; overscroll-behavior: none; }
     #room { display: block; width: 100%; height: 100%; touch-action: none; cursor: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
   </style>
 </head>
 <body>
-  <canvas id="room" aria-label="분홍 벽이 있는 방"></canvas>
+  <canvas id="room" aria-label="견인줄로 금고문을 여는 물리 실험실"></canvas>
   <script src="src/core/math.js"></script>
   <script src="src/core/geometry.js"></script>
   <script src="src/physics/body.js"></script>
@@ -20,11 +23,12 @@
   <script src="src/physics/contact.js"></script>
   <script src="src/physics/joints.js"></script>
   <script src="src/physics/world.js"></script>
-  <script src="src/nudge/level.js"></script>
-  <script src="src/nudge/rules.js"></script>
-  <script src="src/nudge/view.js"></script>
-  <script src="src/nudge/input.js"></script>
-  <script src="src/nudge/audio.js"></script>
-  <script src="src/nudge/main.js"></script>
+  <script src="src/sigma/level.js"></script>
+  <script src="src/sigma/rules.js"></script>
+  <script src="src/sigma/view.js"></script>
+  <script src="src/sigma/hud.js"></script>
+  <script src="src/sigma/input.js"></script>
+  <script src="src/sigma/audio.js"></script>
+  <script src="src/sigma/main.js"></script>
 </body>
 </html>
