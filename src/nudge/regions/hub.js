@@ -19,7 +19,7 @@
     k.solid(game, -13, 3, -12, 17);     // left wall, above the passage to the cliffs
     k.solid(game, 12, 3, 13, 17);       // right wall, above the passage to the plain
     game.checkpointAt('start', 0, 2.2, '태초의 문');
-    R.door = { c: new Vec2(0, 7.6), r: 3.4 };
+    R.door = { c: new Vec2(0, 6.3), r: 2.9 };
     // Passages that will open in later chapters (sealed for now).
     R.seals = [
       { id: 'buoyancy', name: '잠긴 바다', x: -7.5, y: 0, side: 'floor' },

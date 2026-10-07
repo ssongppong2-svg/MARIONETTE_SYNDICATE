@@ -272,7 +272,7 @@ console.log('Friction region: 서리 평원');
 (() => {
   const ctx = setup(['hub', 'friction']);
   const { P, game } = ctx;
-  const R = game.byId.friction, FR = R.FR, M = Lab.Nudge.MAT;
+  const R = game.byId.friction, FR = R.FR;
   let ev = [];
   const log = () => { ev = ev.concat(events(ctx)); };
   const cx = (FR.COLUMN.x0 + FR.COLUMN.x1) / 2;

@@ -46,7 +46,7 @@
     const k = Nudge.kit, M = Nudge.MAT;
     R.name = '서리 평원';
     R.palette = 'friction';
-    R.bounds = [12, -4, 62, 13];
+    R.bounds = [12, -3, 62, 13];
     R.FR = FR;
     const cleared = !!game.save.cleared.friction;
 
@@ -56,13 +56,15 @@
     k.solid(game, H.x0 + 1, H.roof, H.x1, 16);              // hall roof, where the icicles grow
     k.solid(game, S.x0, -3, S.x1, 0, M.sand);               // sand patch
     k.solid(game, I.x0, -3, RP.x0, 0, M.ice);               // ice field
-    k.solid(game, RP.x0, -3, RP.x1, 0);
+    k.solid(game, RP.x0, -3, RP.x1, 0, M.ice);
     // Icy ramp: its foot bends up in steps (4.6°, 9°, 13.5°) into the 16.7° slope,
     // so a pushed load tilts onto it instead of jamming in a crease.
     let x = RP.x0, y = 0;
     for (const sl of [0.08, 0.16, 0.24]) {
       const x2 = x + RP.foot, y2 = y + sl * RP.foot;
-      k.wedge(game, y > 0 ? [[x, 0], [x2, 0], [x2, y2], [x, y]] : [[x, 0], [x2, 0], [x2, y2]], M.ice);
+      // The first step starts 1 cm under the floor, so its face (not its tip) meets a load.
+      const sunk = y > 0 ? null : [x - 0.01 / sl, -0.01];
+      k.wedge(game, sunk ? [sunk, [x2, sunk[1]], [x2, y2]] : [[x, 0], [x2, 0], [x2, y2], [x, y]], M.ice);
       x = x2; y = y2;
     }
     // The slope and the ledge are one body, so nothing snags on a seam at the crest.

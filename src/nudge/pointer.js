@@ -54,10 +54,12 @@
     /* ---------- input (once per frame) ---------- */
     /** Pointer lock: the mouse moved by `d` (world metres) over a frame of `dt` s. */
     moveBy(d, dt = 1 / 60) {
+      // A frame that ran no physics step yet still owes its motion: add to it.
+      const pending = this.fresh && this.mode === 'lock';
       this.mode = 'lock';
-      this.aim = this.body.pos.add(d);
+      this.aim = (pending ? this.aim : this.body.pos).add(d);
       this.offset = new Vec2();
-      this.frame(dt);
+      this.frame(pending ? (this.frameDt || 0) + dt : dt);
     }
     /** No pointer lock: the mouse is at `p` in the world. */
     moveTo(p, dt = 1 / 60) {
