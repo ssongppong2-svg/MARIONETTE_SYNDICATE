@@ -1,0 +1,217 @@
+/*
+ * Nudge — the pointer, the devices, and each region solved start to finish
+ * by moving the pointer exactly as a mouse would (one move per 60 Hz frame).
+ */
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const { load, check, summary, ENGINE_ONLY } = require('./harness');
+const NUDGE = ['kit', 'pointer', 'monsters', 'game', 'regions/hub', 'regions/gravity', 'regions/friction']
+  .map((f) => `src/nudge/${f}.js`)
+  .filter((f) => fs.existsSync(path.join(__dirname, '..', f)));
+const Lab = load(ENGINE_ONLY.concat(NUDGE));
+const { Vec2 } = Lab;
+const V = (x, y) => new Vec2(x, y);
+const DT = 1 / 240;
+
+function setup(regions, save) {
+  const game = new Lab.Nudge.Game({ regions, save });
+  return { game, P: game.pointer };
+}
+/** One 60 Hz frame: the mouse moves, then four physics steps. */
+function frame(ctx, aim) {
+  const { P } = ctx;
+  if (aim) P.moveBy(aim.sub(P.pos)); else P.moveBy(V(0, 0));
+  for (let i = 0; i < 4; i++) ctx.game.step(DT);
+}
+/** Hold the mouse on a point for some seconds (re-aiming each frame, so drift is countered). */
+function hold(ctx, p, seconds, until) {
+  for (let i = 0; i < Math.round(seconds * 60); i++) {
+    if (until && until()) return true;
+    frame(ctx, p);
+  }
+  return false;
+}
+/** Glide the mouse along a path at a given speed. */
+function glide(ctx, pts, speed = 4) {
+  for (const q of pts) {
+    const from = ctx.P.pos.clone(), d = q.dist(from), n = Math.max(1, Math.ceil((d / speed) * 60));
+    for (let i = 1; i <= n; i++) frame(ctx, Vec2.lerp(from, q, i / n));
+  }
+}
+const events = (ctx) => ctx.game.drainEvents();
+
+/* ================================================================ */
+console.log('Pointer: it is the mouse, and it is weak');
+{
+  const ctx = setup(['hub', 'gravity']);
+  const { P, game } = ctx;
+  const R = game.byId.gravity;
+  R.dropper.gone = true;
+  frame(ctx, P.pos.add(V(3, 0.5)));
+  check('in free air it lands on the mouse at once', P.pos.dist(V(3, 2.7)) < 0.01, `${P.pos.x.toFixed(3)}, ${P.pos.y.toFixed(3)}`);
+  hold(ctx, V(3, -1), 0.5);
+  check('rock stops it', Math.abs(P.pos.y - Lab.Nudge.PT.R) < 0.02 && !P.dead, `y ${P.pos.y.toFixed(3)}`);
+  P.respawn(V(-38.0, 8.0));
+  frame(ctx, V(-38.0, 5.0));
+  check('a 12 cm plank cannot be passed through', P.pos.y > 7.2, `y ${P.pos.y.toFixed(3)}`);
+  const ball = R.heavy;
+  P.respawn(V(ball.pos.x + 0.5, ball.pos.y));
+  let maxF = 0;
+  const x0 = ball.pos.x;
+  for (let i = 0; i < 60; i++) { frame(ctx, P.pos.add(V(-0.06, 0))); if (P.touching) maxF = Math.max(maxF, P.F.len()); }
+  check('it pushes a 25 kg ball with at most 40 N', maxF <= 40.01 && ball.pos.x < x0 - 0.2, `${maxF.toFixed(1)} N, moved ${(x0 - ball.pos.x).toFixed(2)} m`);
+  P.respawn(ball.pos.add(V(0.12, 0.12)));
+  frame(ctx);
+  P.grab();
+  hold(ctx, ball.pos.add(V(0, 1.0)), 1);
+  check('its line (60 N) cannot lift 245 N', ball.pos.y < 0.2, `y ${ball.pos.y.toFixed(3)}`);
+  P.release();
+}
+
+/* ================================================================ */
+console.log('Gravity devices');
+{
+  // The blade is a real obstacle: crossing under it at the wrong moment ends the pointer.
+  const ctx = setup(['hub', 'gravity']);
+  const { P, game } = ctx, R = game.byId.gravity, GV = R.GV;
+  R.dropper.gone = true;
+  glide(ctx, [V(-12.5, 0.2)]);
+  hold(ctx, V(-12.5, 0.2), 6, () => Math.abs(R.blade.angle) < 0.15 && R.blade.body.angVel > 0);
+  glide(ctx, [V(-20.5, 0.2)], 3);
+  const ev = events(ctx);
+  check('the blade shatters a pointer caught under its swing', ev.some((e) => e.type === 'shatter' && e.cause === 'blade'), ev.filter((e) => e.type === 'hit').map((e) => `${e.F.toFixed(0)} N`).join(' '));
+
+  // The feather is a decoy: air holds it back and the plates are struck apart.
+  hold(ctx, V(0, 2.2), 1.5);                       // back at the checkpoint …
+  P.respawn(V(-34.6, 9.5));                        // … and straight over to the plank
+  R.heavy.setPosition(V(GV.CUPS[0], GV.PLANK.y + GV.PLANK.t + R.heavy.radius + 0.005)); R.heavy.vel.set(0, 0);
+  R.feather.setPosition(V(GV.CUPS[1], GV.PLANK.y + GV.PLANK.t + R.feather.radius + 0.005)); R.feather.vel.set(0, 0);
+  hold(ctx, V(-34.6, 9.5), 0.5);
+  glide(ctx, [R.pin.body.pos.clone()]);
+  P.grab();
+  glide(ctx, [R.pin.body.pos.add(V(0.45, 0))], 1);
+  P.release();
+  hold(ctx, V(-34.6, 9.5), 3.2);
+  const gal = events(ctx).find((e) => e.type === 'galileo');
+  check('a feather lags behind: the funnel stays shut', gal && !gal.ok && !R.lid.open, gal ? (gal.dt != null ? `Δt ${(gal.dt * 1000).toFixed(0)} ms` : 'the feather was still falling') : 'no drop');
+  check('… and the plank and its pin are set back', R.plank.length === 5 && !R.pin.tripped);
+
+  // Let the latch go with nothing aboard: 2 kg against 26 kg flies up, then winds itself back.
+  R.heavy.setPosition(V(-38.5, R.heavy.radius)); R.heavy.vel.set(0, 0);
+  glide(ctx, [V(-32.5, 9.5), V(-32.5, 1.5), V(-38.0, 1.5), R.latch.body.pos.clone()], 6);   // round the plank's end
+  P.grab();
+  glide(ctx, [R.latch.body.pos.add(V(0.45, 0))], 1);
+  P.release();
+  glide(ctx, [V(-38.0, 1.5)]);
+  const up = hold(ctx, V(-38.0, 1.5), 4, () => R.caught);
+  check('an empty platform is flung up to the pawl', up, `y ${R.liftRail.translation.toFixed(2)}`);
+  const back = hold(ctx, V(-38.0, 1.5), 12, () => R.latched);
+  check('… and winds itself back down and latches', back && R.liftRail.translation < 0.02, `y ${R.liftRail.translation.toFixed(2)}`);
+}
+
+/* ================================================================ */
+console.log('Gravity region: 낙하의 절벽');
+(() => {
+  const ctx = setup(['hub', 'gravity']);
+  const { P, game } = ctx;
+  const R = game.byId.gravity, GV = R.GV;
+  let ev = [];
+  const log = () => { ev = ev.concat(events(ctx)); };
+
+  // 1. The blade: wait for it to swing high to the right, then slip under its tip.
+  glide(ctx, [V(-12.5, 0.5)]);
+  hold(ctx, V(-12.5, 0.5), 6, () => R.blade.angle > 0.85);
+  frame(ctx, V(-20.5, 0.45));
+  hold(ctx, V(-20.5, 0.45), 0.3);
+  log();
+  check('past the blade in one piece', !P.dead && P.pos.x < -20, `x ${P.pos.x.toFixed(2)}`);
+  glide(ctx, [V(-22.4, 1.6)]);
+
+  // 2. Roll the stone ball up the ramp onto the latched platform.
+  const ball = R.heavy;
+  glide(ctx, [V(-38.0, 0.6), V(ball.pos.x + 0.35, ball.pos.y)], 6);
+  // Mouse moving left at 0.7 m/s: the pointer pushes only as fast as the hand goes.
+  for (let i = 0; i < 1500 && ball.pos.x > GV.LIFT.x + 0.1; i++) frame(ctx, V(P.pos.x - 0.012, ball.pos.y));
+  hold(ctx, V(-41.0, 1.0), 1.5);
+  check('stone ball rests on the platform deck', Math.abs(ball.pos.x - GV.LIFT.x) < 0.7 && ball.pos.y > 0.15 && ball.pos.y < 0.4, `x ${ball.pos.x.toFixed(2)} y ${ball.pos.y.toFixed(2)}`);
+
+  // 3. Pull the latch pin; 27 kg against 26 kg, the platform stays down.
+  glide(ctx, [R.latch.body.pos.clone()]);
+  P.grab();
+  glide(ctx, [R.latch.body.pos.add(V(0.45, 0))], 1);
+  P.release();
+  hold(ctx, V(-39.0, 1.2), 0.5);
+  check('latch released, platform still down', !R.latched && R.liftRail.translation < 0.05, `y ${R.liftRail.translation.toFixed(3)}`);
+
+  // 4. Haul the platform up by its edge (net 9.8 N down), dodging the dropper.
+  const deckEdge = R.platform.localPoint(V(GV.LIFT.x + 0.6, 0.15));     // taken while it is still at the bottom
+  const deck = () => R.platform.worldPoint(deckEdge);
+  glide(ctx, [deck().add(V(0.15, 0.1))]);
+  P.grab();
+  for (let i = 0; i < 60 * 12 && R.liftRail.translation < GV.LIFT.top - 0.01; i++) frame(ctx, deck().add(V(0.25 + Math.sin(i * 0.3) * 0.2, 0.6)));
+  hold(ctx, deck().add(V(0.25, 0.6)), 0.2);
+  check('platform hauled to the plank and caught by the pawl', R.caught && R.liftRail.translation > GV.LIFT.top - 0.02, `y ${R.liftRail.translation.toFixed(2)}`);
+  P.release();
+  // Over the ball, down behind it, and roll it along the plank at 1 m/s: up the
+  // low lip of the first cup and short of the high one.
+  glide(ctx, [V(-42.6, 7.9), V(-44.0, 7.9), V(ball.pos.x - 0.31, ball.pos.y + 0.02)], 3);
+  for (let i = 0; i < 600 && ball.pos.x < GV.CUPS[0] - 0.1; i++) frame(ctx, V(P.pos.x + 1.0 / 60, ball.pos.y + 0.02));
+  hold(ctx, V(P.pos.x - 0.2, 8.4), 0.3);
+  hold(ctx, V(-41.5, 8.5), 2);
+  check('stone ball rolls into the first cup', Math.abs(ball.pos.x - GV.CUPS[0]) < 0.15 && ball.pos.y > 7.1, `x ${ball.pos.x.toFixed(2)} y ${ball.pos.y.toFixed(2)}`);
+
+  // 5. Fetch the wooden ball (not the feather) and set it in the second cup.
+  const wood = R.wood;
+  glide(ctx, [V(-30, 11.0), wood.pos.add(V(0, 0.2))], 6);
+  P.grab();
+  glide(ctx, [V(-26, 11.5), V(GV.CUPS[1], 8.4), V(GV.CUPS[1], 7.45)], 3);
+  hold(ctx, V(GV.CUPS[1], 7.45), 0.6);
+  P.release();
+  hold(ctx, V(GV.CUPS[1] + 1.5, 9), 1);
+  check('wooden ball sits in the second cup', Math.abs(wood.pos.x - GV.CUPS[1]) < 0.12 && wood.pos.y > 7.1, `x ${wood.pos.x.toFixed(2)} y ${wood.pos.y.toFixed(2)}`);
+
+  // 6. Pull the plank's pin: both balls fall the same 7 m together.
+  glide(ctx, [R.pin.body.pos.clone()]);
+  P.grab();
+  glide(ctx, [R.pin.body.pos.add(V(0.45, 0))], 1);
+  P.release();
+  glide(ctx, [V(-34.6, 9.5)]);                    // watch from outside the dropper's patch
+  hold(ctx, V(-34.6, 9.5), 3);
+  log();
+  const gal = ev.find((e) => e.type === 'galileo');
+  check('a heavy and a light ball strike the plates together', gal && gal.ok && R.lid.open, gal ? `Δt ${gal.dt != null ? (gal.dt * 1000).toFixed(1) + ' ms' : '—'}` : 'no drop');
+
+  // 7. Lure the dropper over the funnel (offset against the orb's pull) and dodge.
+  const target = -30.8;
+  let drops = 0;
+  for (let k = 0; k < 8 && R.basketMass() < 60; k++) {
+    hold(ctx, V(target, 3.4), 9, () => !R.dropper.rock && R.dropper.cool < R.dropper.reload - 0.05);
+    drops++;
+    hold(ctx, V(target - 2.5, 3.4), 0.25);
+    hold(ctx, V(target - 2.5, 3.4), 2.2);
+  }
+  log();
+  hold(ctx, V(-36, 4), 1);
+  const W = R.rope.tension;
+  check('enough stones fall into the basket (≥ 600 N on the rope)', W >= GV.WALL.strength, `${W.toFixed(0)} N, ${R.basketMass().toFixed(0)} kg after ${drops} drops`);
+  hold(ctx, V(-36, 4), 4, () => R.wallObj.broken);
+  check('the wall gives way to the sustained pull', R.wallObj.broken, `stress ${R.wallObj.stress.toFixed(2)}`);
+
+  // 8. Into the chamber for the fragment, then home.
+  // Over the counterweight's channel, down past the ram, through the breach.
+  const overCW = [V(-43.5, 10.2), V(-45.7, 10.2), V(-45.7, 2.5)];
+  glide(ctx, overCW.concat([V(-49.0, 2.0), GV.GOAL.clone()]), 5);
+  log();
+  check('the gravity fragment is taken', game.save.fragments.gravity === true);
+  glide(ctx, overCW.slice().reverse().concat([V(-36, 4.6), V(-24, 4.6), V(-22, 1.5), V(-20.5, 0.45)]), 6);   // well clear of the orb
+  hold(ctx, V(-20.5, 0.45), 6, () => R.blade.angle < -0.85);
+  frame(ctx, V(-12.5, 0.45));
+  glide(ctx, [V(-6, 2)], 6);
+  log();
+  check('carried home, it flies into the door', game.save.delivered.gravity === true);
+  check('no shattering along the way', !ev.some((e) => e.type === 'shatter'), ev.filter((e) => e.type === 'shatter').map((e) => e.cause).join(','));
+  return ctx;
+})();
+
+summary();
