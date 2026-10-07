@@ -34,6 +34,7 @@
       this.aimT = 0;
       this.dropped = [];
       this.tell = 0;
+      this.region = game.building;
     }
     think(dt) {
       const g = this.game, b = this.body, p = g.pointer.pos;
@@ -59,6 +60,7 @@
       const r = Nudge.kit.ball(g, b.pos.x, b.pos.y - 1.2, this.rockMass, 2600, Nudge.MAT.stone, { angularDamping: 0.8 });
       r.role = 'rock';
       r.gravityScale = 0;
+      if (this.region) { this.region.bodies.push(r); r.regionId = this.region.id; }
       this.rock = r;
       g.emit({ type: 'arm', p: r.pos.clone() });
     }
@@ -150,6 +152,7 @@
       this.push = new Vec2();
       this.grip = 0;
       this.dazed = 0;
+      this.charging = false;
     }
     /** The ground under it and how hard it presses (from last step's contacts). */
     ground() {
@@ -174,7 +177,10 @@
       const { N, mu } = this.ground();
       this.grip = mu * N;
       const tx = Math.max(this.home[0], Math.min(this.home[1], p.x));
-      const want = Math.sign(tx - b.pos.x) * Math.min(4.5, Math.abs(tx - b.pos.x) * 2);
+      // A pointer down at its height gets charged at full tilt; one overhead is only shadowed.
+      this.charging = !g.pointer.dead && p.y < b.pos.y + 0.9 && p.x > this.home[0] - 0.5 && p.x < this.home[1] + 0.5;
+      const dx = tx - b.pos.x;
+      const want = this.charging ? Math.sign(dx) * 4.5 : Math.sign(dx) * Math.min(2.5, Math.abs(dx) * 2);
       const F = Math.max(-this.grip, Math.min(this.grip, (want - b.vel.x) * b.mass * 4));
       this.push = new Vec2(F, 0);
       b.applyForce(this.push);
@@ -187,9 +193,15 @@
   class Icicles {
     constructor(game, xs, y, opts = {}) {
       this.game = game;
-      this.slots = xs.map((x, i) => ({ x, y, t: (opts.phase || 0) + i * (opts.stagger || 0.9), body: null }));
+      this.region = game.building;
+      this.slots = xs.map((x, i) => ({ x, y, t: (opts.phase || 0) + i * (opts.stagger || 0.9), body: null, shiver: 0 }));
       this.period = opts.period || 3.2;
       this.grow = opts.grow || 1.2;
+    }
+    /** Seconds until a slot lets go. */
+    timeToDrop(s) {
+      const d = this.period - 0.05 - (s.t % this.period);
+      return d < 0 ? d + this.period : d;
     }
     update(dt) {
       const g = this.game;
@@ -200,6 +212,7 @@
           const b = g.add(Bodies.polygon([new Vec2(s.x - 0.12, s.y), new Vec2(s.x + 0.12, s.y), new Vec2(s.x, s.y - 0.6)], { density: 900, material: Nudge.MAT.ice }));
           b.role = 'icicle';
           b.born = g.time;
+          if (this.region) { this.region.bodies.push(b); b.regionId = this.region.id; }
           s.body = b;
           g.emit({ type: 'icicle', p: new Vec2(s.x, s.y) });
         }

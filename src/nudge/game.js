@@ -38,6 +38,7 @@
       this.save = Object.assign({ fragments: {}, delivered: {}, checkpoint: 'hub:start', cleared: {} }, opts.save || {});
       this.building = null;
       for (const id of opts.regions || ORDER) this.buildRegion(id);
+      this.markSeams();
       const cp = this.checkpoint(this.save.checkpoint) || this.checkpoint('hub:start');
       this.pointer = new Nudge.Pointer(this, cp.pos);
       this.world.addForce(this.pointer);
@@ -72,7 +73,28 @@
       this.hazards = this.hazards.filter((h) => !R.hazards.includes(h));
       this.fields = this.fields.filter((f) => !R.fields.includes(f));
       this.buildRegion(id);
+      this.markSeams();
       this.emit({ type: 'regionReset', id });
+    }
+    /**
+     * Faces of fixed rock that are buried against other fixed rock are seams,
+     * not surfaces: the collider never uses them as a contact face, so loads
+     * slide across joins in the ground instead of stubbing on them. Things
+     * that can vanish (gates, walls, the plank) never bury a neighbour's face.
+     */
+    markSeams() {
+      const solid = (b) => b.isStatic && !['gate', 'wall', 'plank'].includes(b.role) && b.shapes[0].mask !== 0;
+      const rock = this.world.bodies.filter(solid);
+      for (const A of rock) {
+        for (const s of A.shapes) {
+          if (s.type !== 'polygon') continue;
+          const n = s.wv.length;
+          s.ghost = s.wv.map((v, i) => {
+            const m = Vec2.lerp(v, s.wv[(i + 1) % n], 0.5).addScaled(s.wn[i], 0.003);
+            return rock.some((B) => B !== A && B.shapes.some((t) => t.type === 'polygon' && Lab.Geom.pointInConvex(m, t.wv, t.wn)));
+          });
+        }
+      }
     }
     add(body) {
       this.world.add(body);
@@ -217,7 +239,7 @@
         const vIn = -other.velocityAt(arb.contacts[0].p).dot(n);       // other coming at the pointer
         if (vIn <= 0.3) return;
         const F = (Nudge.PT.MASS * vIn * 1.5) / Nudge.PT.TAU;
-        if (F >= 12) this.hitPointer(F, arb.contacts[0].p, n.neg(), other.role || 'impact');
+        if (F >= 12) this.hitPointer(F, arb.contacts[0].p, n.neg(), other.kind || other.role || 'impact');
         return;
       }
       if (P > 4 && (a.isDynamic || b.isDynamic)) this.emit({ type: 'impact', P, p: arb.contacts[0].p });

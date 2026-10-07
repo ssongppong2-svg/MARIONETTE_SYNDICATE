@@ -63,9 +63,15 @@
     return manifold(nn, [{ p: c.addScaled(nn, -(r + 0.5 * sep)), sep, id: edge }]);
   }
 
+  /**
+   * Deepest separation of p2 from p1's faces. Ghost faces (p1.ghost[i]: seams
+   * buried against a neighbouring solid) still count for the separation test
+   * (`out`), but are never offered as the contact face, so a body sliding
+   * across a seam does not stub itself on it.
+   */
   function findMaxSeparation(p1, p2) {
-    const v1 = p1.wv, n1 = p1.wn, v2 = p2.wv;
-    let best = -Infinity, edge = 0;
+    const v1 = p1.wv, n1 = p1.wn, v2 = p2.wv, ghost = p1.ghost;
+    let best = -Infinity, edge = -1, out = -Infinity;
     for (let i = 0; i < v1.length; i++) {
       const n = n1[i], v = v1[i];
       let si = Infinity;
@@ -73,9 +79,11 @@
         const s = n.x * (v2[j].x - v.x) + n.y * (v2[j].y - v.y);
         if (s < si) si = s;
       }
+      if (si > out) out = si;
+      if (ghost && ghost[i]) continue;
       if (si > best) { best = si; edge = i; }
     }
-    return { edge, sep: best };
+    return { edge, sep: best, out };
   }
 
   function clipSegment(vIn, normal, offset, vertexId) {
@@ -93,12 +101,12 @@
 
   function polygonPolygon(A, B) {
     const sa = findMaxSeparation(A, B);
-    if (sa.sep > 0) return null;
+    if (sa.out > 0) return null;
     const sb = findMaxSeparation(B, A);
-    if (sb.sep > 0) return null;
+    if (sb.out > 0) return null;
 
     let ref, inc, edge1, flip;
-    if (sb.sep > sa.sep + 0.1 * LINEAR_SLOP) {
+    if (sa.edge < 0 || (sb.edge >= 0 && sb.sep > sa.sep + 0.1 * LINEAR_SLOP)) {
       ref = B; inc = A; edge1 = sb.edge; flip = true;
     } else {
       ref = A; inc = B; edge1 = sa.edge; flip = false;

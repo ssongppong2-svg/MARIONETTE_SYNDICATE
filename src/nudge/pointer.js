@@ -46,6 +46,7 @@
       this.handVel = new Vec2();
       this.blocker = null;
       this.fresh = false;
+      this.rests = [];            // normals of the rock it is resting against
     }
     get pos() { return this.body.pos; }
     get target() { return this.aim.add(this.offset); }
@@ -157,6 +158,11 @@
       const s = vd.len();
       if (s > PT.VMAX) vd = vd.scale(PT.VMAX / s);
       vd = this.approach(vd);
+      // Rock it rests on takes the part of the push that goes into it.
+      for (const n of this.rests) {
+        const d = vd.dot(n);
+        if (d < 0) vd = vd.sub(n.scale(d));
+      }
       let F = vd.sub(b.vel).scale(b.mass / dt);
       const cap = this.stagger > 0 ? 0 : this.touching ? PT.PUSH : PT.FREE;
       const f = F.len();
@@ -203,14 +209,17 @@
       const b = this.body, w = this.game.world;
       let touching = false, squeeze = 0;
       const grabbed = this.grip && this.grip.body;
+      const rests = [];
       for (const arb of w.arbiters.values()) {
         if (arb.a !== b && arb.b !== b) continue;
         const o = arb.a === b ? arb.b : arb.a;
+        if (o.isStatic) { rests.push(arb.b === b ? arb.normal : arb.normal.neg()); continue; }
         let P = 0;
         for (const c of arb.contacts) P += c.Pn;
         if (P <= 0) continue;
         if (o.isDynamic && o !== grabbed) { touching = true; squeeze += P / w.dt; }
       }
+      this.rests = rests;
       this.touching = touching;
       this.crush = squeeze >= PT.CRUSH ? this.crush + dt : 0;
       if (this.stagger > 0) {

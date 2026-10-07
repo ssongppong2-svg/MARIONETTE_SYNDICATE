@@ -40,6 +40,29 @@ function glide(ctx, pts, speed = 4) {
   }
 }
 const events = (ctx) => ctx.game.drainEvents();
+/** Press on a load's back face along its own axis (on a slope, that is up the slope). */
+function shove(ctx, b, depth = 0.03, maxStep = 0.08) {
+  const P = ctx.P, hw = b.size[0] / 2;
+  const d = V(Math.cos(b.angle), Math.sin(b.angle));
+  const T = b.pos.sub(d.scale(hw + Lab.Nudge.PT.R - depth));
+  const step = T.sub(P.pos), l = step.len();
+  frame(ctx, l > maxStep ? P.pos.add(step.scale(maxStep / l)) : T);
+}
+/**
+ * Cross under a row of icicles along y at a steady speed, setting off only
+ * when no icicle will be falling where the pointer (and what it carries) is.
+ */
+function crossIcicles(ctx, ic, x1, speed = 2.5) {
+  const P = ctx.P, x0 = P.pos.x, y = P.pos.y, T = Math.abs(x1 - x0) / speed;
+  const safe = () => ic.slots.every((s) => {
+    const k = (s.x - x0) / (x1 - x0);
+    if (k < -0.05 || k > 1.05) return true;
+    const tPass = k * T, half = 0.32 / speed, d = ic.timeToDrop(s);
+    return [[d, d + 0.8], [d - ic.period, d - ic.period + 0.8]].every(([a, b]) => tPass + half < a || tPass - half > b);
+  });
+  for (let i = 0; i < 60 * 4 && !safe(); i++) frame(ctx, V(x0, y));
+  glide(ctx, [V(x1, y)], speed);
+}
 
 /* ================================================================ */
 console.log('Pointer: it is the mouse, and it is weak');
@@ -212,6 +235,127 @@ console.log('Gravity region: 낙하의 절벽');
   check('carried home, it flies into the door', game.save.delivered.gravity === true);
   check('no shattering along the way', !ev.some((e) => e.type === 'shatter'), ev.filter((e) => e.type === 'shatter').map((e) => e.cause).join(','));
   return ctx;
+})();
+
+/* ================================================================ */
+console.log('Friction devices');
+{
+  // Stack order: the same 90 kg with a sandbag at the bottom grips with 0.75, not 0.85.
+  const ctx = setup(['hub', 'friction']);
+  const { P, game } = ctx, R = game.byId.friction, FR = R.FR;
+  P.respawn(V(44, 4));
+  const cx = (FR.COLUMN.x0 + FR.COLUMN.x1) / 2;
+  const drop = (b) => { b.setPosition(V(cx, 2.3), 0); b.vel.set(0, 0); b.angVel = 0; hold(ctx, V(44, 4), 1.0); };
+  [R.sacks[0], ...R.rubber, R.steel, ...R.sacks.slice(1)].forEach(drop);
+  hold(ctx, V(44, 4), 4);
+  const cl = R.clutch();
+  check('a sandbag at the bottom: the wall holds', !R.wallObj.broken && cl.bottom === R.sacks[0], `μ ${cl.mu.toFixed(2)} × N ${cl.N.toFixed(0)} = ${cl.F.toFixed(0)} N < 720 N`);
+
+  // An icicle falling on a pointer that lingers under it.
+  const ic = R.icicles, slot = ic.slots[2];
+  P.respawn(V(slot.x, 1.6));
+  hold(ctx, V(slot.x, 1.6), ic.period + 1);
+  let ev = events(ctx);
+  check('an icicle shatters a pointer lingering under it', ev.some((e) => e.type === 'shatter' && e.cause === 'icicle'), ev.filter((e) => e.type === 'hit').map((e) => `${e.source} ${e.F.toFixed(0)} N`).join(' '));
+
+  // On sand the skater's boots bite with μ·N = 0.9 × 392 N: it runs a pointer down.
+  hold(ctx, V(0, 2.2), 1.5);
+  P.respawn(V(26.5, 0.14));
+  hold(ctx, V(26.5, 0.14), 4, () => P.dead);
+  ev = events(ctx);
+  check('the skater runs down a pointer on the sand', ev.some((e) => e.type === 'shatter'), ev.filter((e) => e.type === 'hit' || e.type === 'shatter').map((e) => `${e.type} ${e.source || e.cause} ${e.F ? e.F.toFixed(0) + ' N' : ''}`).join(', '));
+  check('… with a grip far beyond the pointer\'s', R.skater.grip > 300, `${R.skater.grip.toFixed(0)} N`);
+}
+
+/* ================================================================ */
+console.log('Friction region: 서리 평원');
+(() => {
+  const ctx = setup(['hub', 'friction']);
+  const { P, game } = ctx;
+  const R = game.byId.friction, FR = R.FR, M = Lab.Nudge.MAT;
+  let ev = [];
+  const log = () => { ev = ev.concat(events(ctx)); };
+  const cx = (FR.COLUMN.x0 + FR.COLUMN.x1) / 2;
+  const hallY = 1.6;
+
+  // 0. What the numbers say.
+  const sack = R.sacks[0], rub = R.rubber[0];
+  check('a sandbag on sand holds with more than the pointer can push', 0.85 * sack.mass * 9.8 > Lab.Nudge.PT.PUSH, `${(0.85 * sack.mass * 9.8).toFixed(0)} N > 40 N`);
+  check('a rubber block is light enough to carry on the line', rub.mass * 9.8 < Lab.Nudge.PT.GRAB, `${(rub.mass * 9.8).toFixed(0)} N < 60 N`);
+
+  // 1. Rubber goes in first, carried by hand past the icicles.
+  glide(ctx, [V(12.0, hallY), V(13.2, hallY)], 5);
+  for (const b of R.rubber) {
+    crossIcicles(ctx, R.icicles, b.pos.x);
+    glide(ctx, [V(b.pos.x, b.pos.y + b.size[1] / 2 + 0.1)], 2);
+    P.grab();
+    glide(ctx, [V(b.pos.x, hallY)], 1.5);
+    crossIcicles(ctx, R.icicles, 22.4);
+    glide(ctx, [V(27, 2.8), V(45.6, 3.0), V(cx, 2.8), V(cx, 0.9)], 3);
+    hold(ctx, V(cx, 0.9), 0.4);
+    P.release();
+    glide(ctx, [V(cx, 2.8), V(45.6, 3.0), V(27, 2.8), V(22.4, hallY)], 4);
+    if (b !== R.rubber[2]) crossIcicles(ctx, R.icicles, 21.6);
+  }
+  log();
+  const inCol = () => R.load();
+  check('three rubber blocks stand in the column', R.rubber.every((b) => inCol().includes(b)), inCol().map((b) => b.role).join(','));
+  check('… and rubber is what the belt grips', R.clutch().bottom && R.clutch().bottom.role === 'rubber', `μ ${R.clutch().mu.toFixed(2)}`);
+
+  // 2. The pointer alone cannot free the sunk sandbags; the skater can.
+  const [s0, s1] = R.sacks;
+  hold(ctx, V(30, 3.0), 7, () => s0.pos.x > FR.SAND.x1 + 0.2 && s1.pos.x > FR.SAND.x1 + 0.2 && Math.abs(s0.vel.x) + Math.abs(s1.vel.x) < 0.05);
+  log();
+  check('lured along the sand, the skater shoves both sandbags onto the ice', s0.pos.x > FR.SAND.x1 + 0.2 && s1.pos.x > FR.SAND.x1 + 0.2, `x ${s0.pos.x.toFixed(2)}, ${s1.pos.x.toFixed(2)}`);
+
+  // 3. Each sandbag, frontmost first, across the ice, up the ramp and off the ledge.
+  const onIce = () => R.sacks.filter((b) => !inCol().includes(b) && b.pos.y < 0.5).sort((a, b) => b.pos.x - a.pos.x);
+  let first = true;
+  for (let n = 0; n < 4; n++) {
+    const bags = onIce();
+    if (!bags.length) break;
+    const b = bags[0], hw = b.size[0] / 2, top = () => b.pos.y + b.size[1] / 2 + 0.1;
+    if (b.pos.x - hw - 0.3 < FR.SAND.x1 + 0.3) {
+      // Too near the skater to get behind it: tow it clear on the line from above.
+      glide(ctx, [V(b.pos.x, 1.2), V(b.pos.x, top())], 4);
+      P.grab();
+      glide(ctx, [V(b.pos.x + 2.5, top() + 0.15)], 1.2);
+      P.release();
+    }
+    const next = bags[1];
+    if (next && b.pos.x - hw - (next.pos.x + next.size[0] / 2) < 0.5) {
+      // Too close to get behind it: drag the one behind away on the line.
+      glide(ctx, [V(next.pos.x, 1.2), V(next.pos.x, next.pos.y + next.size[1] / 2 + 0.1)], 4);
+      P.grab();
+      glide(ctx, [V(next.pos.x - 0.9, next.pos.y + next.size[1] / 2 + 0.25)], 1);
+      P.release();
+    }
+    glide(ctx, [V(P.pos.x, 1.2), V(b.pos.x - hw - 0.3, 1.2), V(b.pos.x - hw - 0.16, b.pos.y)], 4);
+    for (let i = 0; i < 60 * 30 && b.pos.x < FR.LEDGE.x1 - hw * 0.4 && b.pos.y > -0.5; i++) shove(ctx, b);
+    glide(ctx, [V(P.pos.x - 0.4, 3.0)], 3);
+    hold(ctx, V(44.5, 3.0), 1.5);
+    if (first) {
+      check('the first load along the ledge knocks the steel block in', inCol().includes(R.steel));
+      first = false;
+    }
+  }
+  log();
+  check('all four sandbags are in the column', R.sacks.every((b) => inCol().includes(b)), inCol().map((b) => b.role).join(','));
+  const cl = R.clutch();
+  check('the belt drags the column with μ·N ≥ 720 N', cl.F >= FR.WALL.strength, `μ ${cl.mu.toFixed(2)} × N ${cl.N.toFixed(0)} = ${cl.F.toFixed(0)} N`);
+  hold(ctx, V(44.5, 3.0), 4, () => R.wallObj.broken);
+  check('the frost wall gives way', R.wallObj.broken, `force ${R.wallObj.force.toFixed(0)} N, stress ${R.wallObj.stress.toFixed(2)}`);
+
+  // 4. Into the vault, then home through the icicles.
+  glide(ctx, [V(46.0, 2.9), V(49.0, 2.9), V(51, 0.3), FR.GOAL.clone()], 4);
+  log();
+  check('the friction fragment is taken', game.save.fragments.friction === true);
+  glide(ctx, [V(51, 0.3), V(49.0, 2.9), V(45.6, 3.0), V(27, 2.8), V(22.4, hallY)], 6);
+  crossIcicles(ctx, R.icicles, 13.0);
+  glide(ctx, [V(8, 2)], 5);
+  log();
+  check('carried home, it flies into the door', game.save.delivered.friction === true);
+  check('no shattering along the way', !ev.some((e) => e.type === 'shatter'), ev.filter((e) => e.type === 'shatter').map((e) => e.cause).join(','));
 })();
 
 summary();
