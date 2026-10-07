@@ -680,6 +680,17 @@
         if (R.icicles) this.drawHangingIcicles(c, R.icicles);
       }
       for (const b of g.world.bodies) {
+        if (!b.rail || !b.world) continue;
+        c.strokeStyle = 'rgba(155, 139, 208, 0.45)';
+        c.lineWidth = 3;
+        c.setLineDash([6, 6]);
+        c.beginPath();
+        c.moveTo(this.X(b.rail[0].x), this.Y(b.rail[0].y));
+        c.lineTo(this.X(b.rail[1].x), this.Y(b.rail[1].y));
+        c.stroke();
+        c.setLineDash([]);
+      }
+      for (const b of g.world.bodies) {
         if (!b.isDynamic || b.isKnob || b === g.pointer.body || b.role === 'monster' || b.role === 'blade' || !this.seen(b)) continue;
         const L = LOOK[b.role] || { fill: '#d9d1ef', edge: '#a89cd2' };
         const fill = b.role === 'shard' && b.color ? b.color : L.fill;

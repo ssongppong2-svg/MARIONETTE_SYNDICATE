@@ -101,6 +101,15 @@
       if (this.building) { this.building.bodies.push(body); body.regionId = this.building.id; }
       return body;
     }
+    /**
+     * Build into a region during play (a plank put back, a wall's shards), so
+     * what is made is drawn with the region and goes when the region resets.
+     */
+    within(R, fn) {
+      const prev = this.building;
+      this.building = R;
+      try { return fn(); } finally { this.building = prev; }
+    }
     addJoint(j) {
       this.world.addJoint(j);
       if (this.building) this.building.joints.push(j);

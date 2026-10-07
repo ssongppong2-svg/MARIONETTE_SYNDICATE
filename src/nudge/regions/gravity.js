@@ -115,8 +115,6 @@
 
     /* ---------------- balance lift ---------------- */
     const LF = GV.LIFT, CW = GV.CW;
-    k.solid(game, CW.x - 0.57, 1.0, CW.x - 0.47, 9.3);   // counterweight channel
-    k.solid(game, CW.x + 0.48, 1.0, CW.x + 0.58, 9.3);
     // The deck dips 3 cm toward a low lip on the far side, so a load settles there
     // instead of drifting back off the edge it came in by.
     const dx0 = LF.x - LF.w / 2, dx1 = LF.x + LF.w / 2;
@@ -132,6 +130,9 @@
     }));
     const cw = (R.counter = game.add(Bodies.box(CW.x, 8.4, 0.8, 0.6, { mass: CW.mass, material: M.iron, fixedRotation: true })));
     cw.role = 'counterweight';
+    // It runs on a vertical rail (no walls around it, so the lift stays open on all sides).
+    cw.rail = [new Vec2(CW.x, 1.0), new Vec2(CW.x, 9.3)];
+    game.addJoint(new Joints.SliderJoint(game.anchor, cw, cw.pos, new Vec2(0, 1), { lower: 1.3 - 8.4, upper: 0.6 }));
     const l1 = hub(game, LF.x, 9.8), l2 = hub(game, CW.x, 9.8);
     R.liftRope = game.addJoint(new Joints.RopePath([
       { body: plat, point: new Vec2(LF.x + 0.1, 0.12) },
@@ -157,18 +158,22 @@
     const P = GV.PLANK;
     k.solid(game, P.x1, P.y - 0.4, P.x1 + 1.0, P.y + P.t);   // the ledge holding the plank's pin
     R.plates = GV.PLATES.map((x) => game.device(new Nudge.Plate(game, x - 0.5, x + 0.5, 0, { minImpulse: 2 })));   // flush with the floor
-    R.makePlank = () => {
+    R.makePlank = () => game.within(R, () => {
       R.plank = [k.solid(game, P.x0, P.y, P.x1, P.y + P.t, M.wood)];
       for (const x of GV.CUPS) {
         R.plank.push(k.wedge(game, [[x - 0.2, P.y + P.t], [x - 0.12, P.y + P.t], [x - 0.12, P.y + P.t + 0.04]], M.wood));
         R.plank.push(k.wedge(game, [[x + 0.12, P.y + P.t], [x + 0.2, P.y + P.t], [x + 0.12, P.y + P.t + 0.09]], M.wood));
       }
       for (const b of R.plank) b.role = 'plank';
-    };
+    });
     R.makePlank();
     R.drop = null;
     R.pin = game.device(new Nudge.Pin(game, P.x1 + 0.5, P.y + P.t + 0.2, { friction: 25, release: 0.3, onRelease: () => {
-      for (const b of R.plank) game.world.remove(b);
+      for (const b of R.plank) {
+        game.world.remove(b);
+        const i = R.bodies.indexOf(b);
+        if (i >= 0) R.bodies.splice(i, 1);
+      }
       R.plank = [];
       R.drop = { t: game.time, hits: [] };
     } }));

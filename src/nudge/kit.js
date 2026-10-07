@@ -80,6 +80,7 @@
       this.endure = opts.endure || 2;
       this.axis = opts.axis || new Vec2(1, 0);
       this.color = opts.color;
+      this.region = game.building;
       this.force = 0;
       this.stress = 0;
       this.broken = false;
@@ -108,9 +109,10 @@
       g.world.remove(this.body);
       const rng = Lab.Mathx.makeRng(Math.round(x0 * 31 + y0 * 7));
       this.shards = [];
+      const add = (b) => (this.region ? g.within(this.region, () => g.add(b)) : g.add(b));
       for (let y = y0 + 0.15; y < y1 - 0.1; y += 0.42) {
         for (let x = x0 + 0.1; x < x1; x += 0.25) {
-          const piece = g.add(Bodies.box(x, y, 0.16 + rng() * 0.1, 0.18 + rng() * 0.18, { density: 300, material: MAT.soft, angle: (rng() - 0.5) * 0.6 }));
+          const piece = add(Bodies.box(x, y, 0.16 + rng() * 0.1, 0.18 + rng() * 0.18, { density: 300, material: MAT.soft, angle: (rng() - 0.5) * 0.6 }));
           piece.role = 'shard';
           piece.vel.set((rng() - 0.5) * 3, rng() * 1.5);
           piece.angVel = (rng() - 0.5) * 6;
@@ -129,6 +131,8 @@
       this.shards = this.shards.filter((s) => {
         if (g.time - s.born < s.life) return true;
         g.world.remove(s);
+        const i = this.region ? this.region.bodies.indexOf(s) : -1;
+        if (i >= 0) this.region.bodies.splice(i, 1);
         g.emit({ type: 'pop', p: s.pos.clone(), color: this.color });
         return false;
       });
@@ -190,6 +194,8 @@
     }
     /** Put the pin back (when its mechanism resets). */
     reset() {
+      const ptr = this.game.pointer;
+      if (ptr && ptr.grip && ptr.grip.body === this.body) ptr.release();
       this.body.setPosition(this.origin.clone());
       this.body.vel.set(0, 0);
       this.tripped = false;

@@ -119,6 +119,15 @@ console.log('Gravity devices');
   const gal = events(ctx).find((e) => e.type === 'galileo');
   check('a feather lags behind: the funnel stays shut', gal && !gal.ok && !R.lid.open, gal ? (gal.dt != null ? `Δt ${(gal.dt * 1000).toFixed(0)} ms` : 'the feather was still falling') : 'no drop');
   check('… and the plank and its pin are set back', R.plank.length === 5 && !R.pin.tripped);
+  check('… the plank put back belongs to the region (so it is drawn)', R.plank.every((b) => b.world && R.bodies.includes(b)));
+
+  // Pull the pin again and keep holding it through the reset: the line lets go, the pin sits home.
+  glide(ctx, [R.pin.body.pos.clone()]);
+  P.grab();
+  glide(ctx, [R.pin.body.pos.add(V(0.45, 0))], 1);
+  hold(ctx, R.pin.body.pos.clone(), 3.4);
+  check('a pin held while the plank comes back is let go, and stays in', !P.grip && R.plank.length === 5 && !R.pin.tripped && R.pin.travel < 0.05, `travel ${R.pin.travel.toFixed(2)} m`);
+  events(ctx);
 
   // Let the latch go with nothing aboard: 2 kg against 26 kg flies up, then winds itself back.
   R.heavy.setPosition(V(-38.5, R.heavy.radius)); R.heavy.vel.set(0, 0);
@@ -131,6 +140,16 @@ console.log('Gravity devices');
   check('an empty platform is flung up to the pawl', up, `y ${R.liftRail.translation.toFixed(2)}`);
   const back = hold(ctx, V(-38.0, 1.5), 12, () => R.latched);
   check('… and winds itself back down and latches', back && R.liftRail.translation < 0.02, `y ${R.liftRail.translation.toFixed(2)}`);
+
+  // Nothing walls the lift in: from beside it the pointer reaches the ram's side at head height.
+  glide(ctx, [V(-42.0, 3.0), V(-45.7, 3.0)], 3);
+  check('the lift is open on its far side (the counterweight runs on a rail)', P.pos.dist(V(-45.7, 3.0)) < 0.05, `at ${P.pos.x.toFixed(2)}, ${P.pos.y.toFixed(2)}`);
+
+  // A region reset leaves no plank behind but the new one.
+  game.resetRegion('gravity');
+  const R2 = game.byId.gravity;
+  const planks = game.world.bodies.filter((b) => b.role === 'plank');
+  check('after a reset only the new plank is in the world', planks.length === 5 && planks.every((b) => R2.plank.includes(b)), `${planks.length} plank pieces`);
 }
 
 /* ================================================================ */
