@@ -40,6 +40,15 @@ function glide(ctx, pts, speed = 4) {
   }
 }
 const events = (ctx) => ctx.game.drainEvents();
+/** Wait without standing still: circle a point at 3 m/s, faster than the dropper can follow. */
+function wander(ctx, c, seconds, until) {
+  for (let i = 0; i < Math.round(seconds * 60); i++) {
+    if (until && until()) return true;
+    const a = (i / 60) * 5;
+    frame(ctx, c.add(V(Math.cos(a) * 0.6, Math.sin(a) * 0.4)));
+  }
+  return false;
+}
 /** Press on a load's back face along its own axis (on a slope, that is up the slope). */
 function shove(ctx, b, depth = 0.03, maxStep = 0.08) {
   const P = ctx.P, hw = b.size[0] / 2;
@@ -145,6 +154,19 @@ console.log('Gravity devices');
   glide(ctx, [V(-42.0, 3.0), V(-45.7, 3.0)], 3);
   check('the lift is open on its far side (the counterweight runs on a rail)', P.pos.dist(V(-45.7, 3.0)) < 0.05, `at ${P.pos.x.toFixed(2)}, ${P.pos.y.toFixed(2)}`);
 
+  // The dropper roams the whole canyon, so a stone may land on the plank: left lying, it crumbles.
+  const stone = (x, y) => {
+    const r = Lab.Nudge.kit.ball(game, x, y, 20, 2600, Lab.Nudge.MAT.stone, {});
+    r.role = 'rock';
+    R.dropper.dropped.push(r);
+    return r;
+  };
+  R.dropper.gone = true;
+  const onPlank = stone(-38.0, GV.PLANK.y + GV.PLANK.t), inBasket = stone(R.basket.pos.x, R.basket.pos.y - 0.2);
+  wander(ctx, V(-36, 4), 6);
+  check('a stone left on the plank crumbles after a few seconds', !onPlank.world);
+  check('… but a stone in the basket stays', !!inBasket.world && R.inBasket(inBasket), `${R.basketMass().toFixed(0)} kg in the basket`);
+
   // A region reset leaves no plank behind but the new one.
   game.resetRegion('gravity');
   const R2 = game.byId.gravity;
@@ -200,7 +222,7 @@ console.log('Gravity region: 낙하의 절벽');
   glide(ctx, [V(-42.6, 7.9), V(-44.0, 7.9), V(ball.pos.x - 0.31, ball.pos.y + 0.02)], 3);
   for (let i = 0; i < 600 && ball.pos.x < GV.CUPS[0] - 0.1; i++) frame(ctx, V(P.pos.x + 1.0 / 60, ball.pos.y + 0.02));
   hold(ctx, V(P.pos.x - 0.2, 8.4), 0.3);
-  hold(ctx, V(-41.5, 8.5), 2);
+  wander(ctx, V(-41.5, 8.8), 2);
   check('stone ball rolls into the first cup', Math.abs(ball.pos.x - GV.CUPS[0]) < 0.15 && ball.pos.y > 7.1, `x ${ball.pos.x.toFixed(2)} y ${ball.pos.y.toFixed(2)}`);
 
   // 5. Fetch the wooden ball (not the feather) and set it in the second cup.
@@ -218,26 +240,27 @@ console.log('Gravity region: 낙하의 절벽');
   P.grab();
   glide(ctx, [R.pin.body.pos.add(V(0.45, 0))], 1);
   P.release();
-  glide(ctx, [V(-34.6, 9.5)]);                    // watch from outside the dropper's patch
-  hold(ctx, V(-34.6, 9.5), 3);
+  glide(ctx, [V(-34.6, 9.5)]);
+  wander(ctx, V(-34.6, 9.6), 3);                   // keep moving: the dropper is overhead
   log();
   const gal = ev.find((e) => e.type === 'galileo');
   check('a heavy and a light ball strike the plates together', gal && gal.ok && R.lid.open, gal ? `Δt ${gal.dt != null ? (gal.dt * 1000).toFixed(1) + ' ms' : '—'}` : 'no drop');
 
-  // 7. Lure the dropper over the funnel (offset against the orb's pull) and dodge.
+  // 7. Lure the dropper over the funnel (offset against the orb's pull): stand still
+  // until it lets go, then slip aside and keep moving, so it cannot settle over you.
   const target = -30.8;
   let drops = 0;
   for (let k = 0; k < 8 && R.basketMass() < 60; k++) {
-    hold(ctx, V(target, 3.4), 9, () => !R.dropper.rock && R.dropper.cool < R.dropper.reload - 0.05);
+    const before = R.dropper.dropped.length;
+    hold(ctx, V(target, 3.4), 14, () => R.dropper.dropped.length > before);
     drops++;
-    hold(ctx, V(target - 2.5, 3.4), 0.25);
-    hold(ctx, V(target - 2.5, 3.4), 2.2);
+    for (let i = 0; i < 60 * 3.5; i++) frame(ctx, V(target - 3.0 + 0.8 * Math.sin(i / 60 * 5), 3.4));
   }
   log();
-  hold(ctx, V(-36, 4), 1);
-  const W = R.rope.tension;
-  check('enough stones fall into the basket (≥ 600 N on the rope)', W >= GV.WALL.strength, `${W.toFixed(0)} N, ${R.basketMass().toFixed(0)} kg after ${drops} drops`);
-  hold(ctx, V(-36, 4), 4, () => R.wallObj.broken);
+  // What hangs on the rope: the 3 kg basket and the stones in it.
+  const W = (3 + R.basketMass()) * 9.8;
+  check('enough stones fall into the basket (≥ 600 N on the rope)', W >= GV.WALL.strength, `${W.toFixed(0)} N (${R.basketMass().toFixed(0)} kg of stone) after ${drops} drops`);
+  wander(ctx, V(-36, 4), 4, () => R.wallObj.broken);
   check('the wall gives way to the sustained pull', R.wallObj.broken, `stress ${R.wallObj.stress.toFixed(2)}`);
 
   // 8. Into the chamber for the fragment, then home.

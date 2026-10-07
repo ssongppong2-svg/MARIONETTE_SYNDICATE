@@ -11,8 +11,10 @@
  *   funnel       leads to a counterweight basket on a rope; the rope runs under
  *                the canyon floor to a ram against the wall
  *   wall         gives way to 600 N held for 2 s — about 61 kg in the basket
- *   dropper      floats over the pointer (on the funnel side) and drops 20 kg
- *                stones; a gravity orb beside the funnel bends what falls near it
+ *   dropper      floats over the pointer anywhere under the canyon's sky and
+ *                drops 20 kg stones; a stone left lying (outside the basket)
+ *                crumbles after 4 s. A gravity orb beside the funnel bends
+ *                what falls near it
  */
 (function (root) {
   'use strict';
@@ -91,14 +93,15 @@
     basket.role = 'basket';
     R.basketFloor = basket.localPoint(new Vec2(bx, btop - bh + bt));
     const inLo = basket.localPoint(new Vec2(bx - bw / 2 + bt, btop - bh + bt)), inHi = basket.localPoint(new Vec2(bx + bw / 2 - bt, btop + 0.5));
+    /** Is a body inside the basket? */
+    R.inBasket = (b) => {
+      const q = basket.localPoint(b.pos);
+      return q.x > inLo.x && q.x < inHi.x && q.y > inLo.y && q.y < inHi.y;
+    };
     /** Mass resting in the basket (what its weight on the rope is made of). */
     R.basketMass = () => {
       let m = 0;
-      for (const b of game.world.bodies) {
-        if (!b.isDynamic || b === basket || b.role === 'pointer') continue;
-        const q = basket.localPoint(b.pos);
-        if (q.x > inLo.x && q.x < inHi.x && q.y > inLo.y && q.y < inHi.y) m += b.mass;
-      }
+      for (const b of game.world.bodies) if (b.isDynamic && b !== basket && b.role !== 'pointer' && R.inBasket(b)) m += b.mass;
       return m;
     };
     game.addJoint(new Joints.SliderJoint(game.anchor, basket, basket.pos, new Vec2(0, 1), {}));
@@ -189,8 +192,9 @@
     R.feather.role = 'feather';
 
     /* ---------------- monsters ---------------- */
-    // It haunts the funnel side only: what it drops never lands on the plank.
-    R.dropper = game.monster(new Nudge.Dropper(game, { home: [-32.6, -22], alt: 12.8, rockMass: 20, reload: 5 }));
+    // It follows the pointer under the whole open sky of the canyon (the rock over
+    // the chamber and over the corridor are its only bounds).
+    R.dropper = game.monster(new Nudge.Dropper(game, { home: [-46.0, -21.5], alt: 12.8, rockMass: 20, reload: 5 }));
     R.orb = game.device(new Nudge.Orb(game, -28.2, 2.4, { K: 40, range: 5.5, r: 0.35 }));   // its reach stops short of the basket
 
     /* ---------------- the fragment ---------------- */
@@ -233,14 +237,22 @@
         R.latch.reset();
         game.emit({ type: 'latch', p: plat.pos.clone() });
       }
-      // Too many loose stones on the canyon floor: the oldest crumble away.
-      const loose = R.dropper.dropped.filter((r) => r.world && r.pos.y > -0.5);
-      if (loose.length > 8) {
-        const r = loose[0];
+      // A stone left lying anywhere but in the basket crumbles after 4 s, so none
+      // can bury the plank, the lift or the path for good; too many at once, the
+      // oldest goes first.
+      const crumble = (r) => {
         game.world.remove(r);
         R.dropper.dropped.splice(R.dropper.dropped.indexOf(r), 1);
         game.emit({ type: 'pop', p: r.pos.clone(), color: '#b9c3dd' });
+      };
+      for (const r of R.dropper.dropped.slice()) {
+        if (!r.world) continue;
+        const still = r.vel.len() < 0.08 && Math.abs(r.angVel) < 0.5 && !R.inBasket(r);
+        r.restT = still ? (r.restT || 0) + dt : 0;
+        if (r.restT > 4) crumble(r);
       }
+      const loose = R.dropper.dropped.filter((r) => r.world && !R.inBasket(r));
+      if (loose.length > 8) crumble(loose[0]);
     };
   };
 
