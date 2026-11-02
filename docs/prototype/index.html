@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MARIONETTE SYNDICATE</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Nanum+Myeongjo:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    /* 확정 팔레트 — 금빛 궁정이 썩어가는 */
+    --shadow:#0f0f12; --bg2:#15110f; --panel:#171210; --panel2:#1d1713;
+    --gold:#c2a14a; --gold-d:#8a703060; --ivory:#e8e2d0; --wood:#5a4632; --wood-d:#3a2e20;
+    --ink:#e8e2d0; --dim:#8a7f6d;
+    --purple:#2a1b2e; --navy:#1a2333;
+    --blood:#7a1212; --blood2:#a83232;
+    --econ:#4e5a3c; --econ2:#7d8f56; --earth:#6b4f2a;
+    --line:rgba(194,161,74,.18); --faint:rgba(194,161,74,.07);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;color:var(--ink);
+    font-family:"Nanum Myeongjo","Malgun Gothic",serif;
+    background:
+      radial-gradient(120% 70% at 50% -6%, rgba(194,161,74,.08), transparent 55%),
+      radial-gradient(90% 80% at 50% 120%, rgba(42,27,46,.35), transparent 60%),
+      var(--shadow);
+    background-attachment:fixed;-webkit-font-smoothing:antialiased}
+  h1,h2,h3,h4{margin:0;font-family:"Cinzel","Nanum Myeongjo",serif;font-weight:600;letter-spacing:.1em}
+  #app{max-width:1120px;margin:0 auto;padding:20px}
+  header{display:flex;align-items:center;gap:16px;border-bottom:1px solid var(--line);padding-bottom:13px;margin-bottom:18px}
+  header h1{font-size:19px;letter-spacing:.30em;color:var(--gold);text-shadow:0 0 22px rgba(194,161,74,.3),0 1px 0 #000}
+  header .sub{color:var(--dim);font-size:11px;letter-spacing:.12em}
+  .topbtns{margin-left:auto;display:flex;gap:10px;align-items:center}
+  .toggle{font-size:11px;color:var(--dim);display:flex;align-items:center;gap:6px;cursor:pointer;letter-spacing:.05em}
+
+  /* scoreboard */
+  .score{display:flex;align-items:center;justify-content:space-between;border:1px solid var(--line);
+    padding:12px 18px;margin-bottom:16px;background:linear-gradient(180deg,var(--panel2),var(--panel));
+    box-shadow:inset 0 0 30px rgba(0,0,0,.55)}
+  .score .side{display:flex;flex-direction:column;align-items:center;min-width:104px;gap:7px}
+  .score .side b{font-size:12px;letter-spacing:.2em;font-weight:700;font-family:"Cinzel",serif}
+  .side.steel b{color:#9fb0c8} .side.blood b{color:#c98a6a}
+  .score .pips{display:flex;gap:7px}
+  .pip{width:11px;height:11px;border:1px solid var(--line);transform:rotate(45deg)}
+  .side.steel .pip.on{background:#9fb0c8;box-shadow:0 0 8px rgba(159,176,200,.5)}
+  .side.blood .pip.on{background:var(--blood2);box-shadow:0 0 8px rgba(168,50,50,.55)}
+  .score .mid{text-align:center;color:var(--dim);font-size:11px;letter-spacing:.07em;line-height:2}
+  .score .mid .turnname{font-size:15px;letter-spacing:.16em;font-family:"Cinzel","Nanum Myeongjo",serif}
+  .score .mid b{color:var(--ink)}
+
+  .layout{display:grid;grid-template-columns:1fr 326px;gap:20px;align-items:start}
+  @media(max-width:880px){.layout{grid-template-columns:1fr}}
+
+  /* board — 이중 프레임, 구역 색 */
+  .boardwrap{position:relative;padding:20px;background:radial-gradient(120% 85% at 50% 50%, #1a1512, #0d0b0a 78%);
+    border:1px solid var(--wood);box-shadow:0 0 0 1px #000, inset 0 0 70px rgba(0,0,0,.7), 0 14px 50px rgba(0,0,0,.6)}
+  .boardwrap::before{content:"";position:absolute;inset:9px;border:1px solid rgba(194,161,74,.30);pointer-events:none;z-index:1}
+  .grid{display:grid;grid-template-columns:repeat(10,1fr);aspect-ratio:1/1;position:relative;z-index:2;
+    border-top:1px solid var(--faint);border-left:1px solid var(--faint)}
+  .cell{position:relative;border-right:1px solid var(--faint);border-bottom:1px solid var(--faint);
+    display:flex;align-items:center;justify-content:center;user-select:none}
+  .cell.zone-outer{background:rgba(78,90,60,.10)}   /* 농노 외곽 — 탁한 녹/갈 */
+  .cell.zone-mid{background:rgba(150,148,150,.045)}  /* 전투 중간 — 회색+금 */
+  .cell.zone-court{background:rgba(194,161,74,.10)}  /* 궁정 중앙 — 금/아이보리 */
+  .cell.move{cursor:pointer}
+  .cell.move::after{content:"";position:absolute;width:7px;height:7px;border-radius:50%;
+    background:var(--gold);opacity:.65;box-shadow:0 0 7px var(--gold)}
+
+  /* tokens — 금테 메달리온, 진영=속색 */
+  .tok{width:82%;height:82%;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    cursor:pointer;position:relative;color:var(--ink);border:1.5px solid var(--gold)}
+  .tok svg{width:58%;height:58%;display:block;filter:drop-shadow(0 1px 1px rgba(0,0,0,.8))}
+  .tok.blue{background:radial-gradient(circle at 38% 30%, #26324a, #0c1018);
+    box-shadow:inset 0 1.5px 2px rgba(255,255,255,.13), inset 0 -3px 6px rgba(0,0,0,.6), 0 0 11px rgba(40,70,120,.16)}
+  .tok.red{background:radial-gradient(circle at 38% 30%, #40222a, #170b0e);
+    box-shadow:inset 0 1.5px 2px rgba(255,255,255,.11), inset 0 -3px 6px rgba(0,0,0,.62), 0 0 11px rgba(150,40,50,.16)}
+  .tok.serf{width:66%;height:66%;border-style:dashed;border-color:rgba(194,161,74,.5);filter:saturate(.5) brightness(.92)}
+  .tok.serf svg{width:52%;height:52%}
+  .tok.sel{outline:2px solid var(--gold);outline-offset:2px;filter:drop-shadow(0 0 9px rgba(194,161,74,.6))}
+  .tok.is-target{outline:2px solid var(--blood2);outline-offset:2px}         /* 타겟 = 붉은 테두리 */
+  .tok.targetable{outline:2px solid var(--blood2);outline-offset:2px;cursor:crosshair;
+    filter:drop-shadow(0 0 9px rgba(168,50,50,.6))}
+  .tok.bribable{cursor:pointer;outline:2px solid var(--econ2);outline-offset:3px;animation:bribeblink 1s ease-in-out infinite} /* 매수가능 = 녹색 깜빡임 */
+  @keyframes bribeblink{0%,100%{box-shadow:0 0 4px rgba(125,143,86,.4)}50%{box-shadow:0 0 14px rgba(125,143,86,.85)}}
+  .tok.rooted{opacity:.36;filter:grayscale(1)}
+
+  .chip{position:absolute;font-size:8px;letter-spacing:.05em;font-weight:700;line-height:1;padding:2px 4px;font-family:"Cinzel",serif;z-index:3}
+  .chip.vip{top:-7px;left:50%;transform:translateX(-50%);border:1px solid var(--gold);background:#0f0d0a;color:var(--gold)}
+  .chip.tgt{bottom:-7px;left:50%;transform:translateX(-50%);background:var(--blood);color:#f0d8d4;border:1px solid var(--blood2)}
+  .ring-vip{position:absolute;inset:-4px;border-radius:50%;border:1.5px dashed var(--gold);opacity:.8;
+    box-shadow:0 0 10px rgba(194,161,74,.35)}
+
+  /* fx */
+  .fx{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:22;overflow:visible}
+  .strike{stroke:var(--blood2);stroke-width:2.6;stroke-linecap:round;stroke-dasharray:700;stroke-dashoffset:700;
+    filter:drop-shadow(0 0 5px var(--blood2));animation:draw .2s ease-out forwards, vanish .22s ease .22s forwards}
+  @keyframes draw{to{stroke-dashoffset:0}} @keyframes vanish{to{opacity:0}}
+  .spark{fill:none;stroke:var(--blood2);stroke-width:2;animation:spark .42s ease-out forwards}
+  @keyframes spark{0%{r:2;opacity:1}100%{r:23;opacity:0}}
+  .tok.dying{animation:shake .1s 2 ease-in-out, die .3s .22s forwards;z-index:15}
+  @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-3px)}75%{transform:translateX(3px)}}
+  @keyframes die{0%{transform:scale(1) rotate(0);opacity:1}100%{transform:scale(.1) rotate(40deg);opacity:0}}
+  .tok.flipping{animation:flip .46s ease-in-out;z-index:15}
+  @keyframes flip{0%{transform:rotateY(0)}45%,55%{transform:rotateY(90deg) scale(1.18)}100%{transform:rotateY(0)}}
+
+  /* 궁정 신문 — 처형 속보 */
+  .broadcast{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:30;width:min(78%,420px);
+    background:linear-gradient(180deg,#e9e3d2,#d8cfb6);color:#241c12;border:1px solid var(--wood);
+    box-shadow:0 0 0 4px rgba(15,15,18,.5),0 18px 40px rgba(0,0,0,.7);padding:14px 18px 16px;
+    animation:bcin .5s cubic-bezier(.2,1.1,.3,1) forwards, bcout .6s ease 3.4s forwards}
+  @keyframes bcin{from{opacity:0;transform:translate(-50%,-22px) scale(.94)}to{opacity:1;transform:translate(-50%,0) scale(1)}}
+  @keyframes bcout{to{opacity:0;transform:translate(-50%,-14px) scale(.97)}}
+  .broadcast .bc-tag{font-family:"Cinzel",serif;font-size:9px;letter-spacing:.34em;color:var(--blood);font-weight:700}
+  .broadcast h4{font-family:"Cinzel","Nanum Myeongjo",serif;font-size:18px;letter-spacing:.06em;color:#1a130b;margin:5px 0 7px}
+  .broadcast .bc-rule{height:0;border-top:2px double #6a563a;margin:0 0 9px}
+  .broadcast p{margin:0;font-size:13px;line-height:1.75;color:#3a2e1e;font-style:italic}
+  .broadcast .bc-foot{margin-top:9px;font-size:9px;letter-spacing:.1em;color:#7a6a4a;display:flex;justify-content:space-between}
+
+  /* panels */
+  .panel{border:1px solid var(--line);padding:15px;margin-bottom:15px;background:var(--panel);box-shadow:inset 0 0 24px rgba(0,0,0,.4)}
+  .panel h3{font-size:11px;letter-spacing:.2em;color:var(--gold);margin-bottom:11px;font-weight:600}
+  .orders{display:flex;gap:10px}
+  .order{flex:1;border:1px solid var(--line);padding:10px;text-align:center;background:#0f0d0a}
+  .order.vip{border-color:rgba(194,161,74,.45)} .order.tgt{border-color:rgba(168,50,50,.45)}
+  .order .lab{font-size:9px;letter-spacing:.13em;color:var(--dim);font-family:"Cinzel",serif}
+  .order .who{font-size:15px;font-weight:700;margin-top:6px;display:flex;align-items:center;justify-content:center;gap:7px}
+  .order.vip .who{color:var(--gold)} .order.tgt .who{color:#c98a6a}
+  .order .who svg{width:17px;height:17px}
+  .winprog{display:flex;gap:8px;margin-top:11px}
+  .winprog div{flex:1;text-align:center;border:1px solid var(--faint);padding:7px;font-size:10px;letter-spacing:.05em;color:var(--dim);font-family:"Cinzel",serif}
+  .winprog .done{border-color:var(--blood2);color:#f0d8d4;background:rgba(122,18,18,.4);font-weight:700}
+  .stats{display:flex;justify-content:space-between;font-size:11px;margin-top:11px;color:var(--dim);letter-spacing:.03em}
+  .stats b{color:var(--ink)}
+  .actions{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:13px}
+  button{font-family:"Cinzel","Nanum Myeongjo",serif;font-size:11px;letter-spacing:.07em;padding:11px 8px;cursor:pointer;
+    background:transparent;color:var(--ink);border:1px solid var(--line);transition:.14s}
+  button:hover:not(:disabled){border-color:var(--gold);color:var(--gold);box-shadow:0 0 12px rgba(194,161,74,.18) inset}
+  button:disabled{opacity:.26;cursor:not-allowed}
+  #btnExec:hover:not(:disabled){border-color:var(--blood2);color:#e0a89c;box-shadow:0 0 12px rgba(122,18,18,.3) inset}
+  #btnBribe:hover:not(:disabled){border-color:var(--econ2);color:#b8c890}
+  button.primary{background:linear-gradient(180deg,#b89a45,#7a6326);color:#1a130a;border-color:var(--gold);font-weight:700}
+  button.primary:hover:not(:disabled){background:linear-gradient(180deg,#c2a14a,#8a7030);box-shadow:none}
+  button.wide{grid-column:1/3}
+  .sel-info{font-size:12px;color:var(--dim);margin-top:11px;min-height:30px;line-height:1.6;letter-spacing:.02em}
+  .sel-info b{color:var(--ink)}
+  .log{height:120px;overflow:auto;font-size:12px;line-height:1.85;color:var(--dim);letter-spacing:.01em}
+  .log .kill{color:#c98a6a} .log .gold{color:var(--gold);font-style:italic} .log .news{color:#b9a06a}
+  .log .win{color:#f0d8d4;font-weight:700;border-bottom:1px solid var(--blood2);display:inline-block}
+  .legend{display:grid;grid-template-columns:1fr 1fr;gap:5px 12px;margin-top:6px}
+  .legend .li{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--dim);letter-spacing:.03em}
+  .legend .li .mini{width:21px;height:21px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:none;
+    border:1px solid var(--gold);background:radial-gradient(circle at 38% 30%,#26324a,#0c1018)}
+  .legend .li .mini svg{width:60%;height:60%;color:var(--ink)}
+  .legnote{font-size:10px;color:var(--dim);margin-top:11px;letter-spacing:.03em;line-height:1.7}
+
+  .veil{position:absolute;inset:0;z-index:40;background:radial-gradient(60% 50% at 50% 40%, #1a1410, #07060a 82%);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;text-align:center;padding:26px}
+  .veil h2{font-size:19px;letter-spacing:.26em;color:var(--gold);text-shadow:0 0 22px rgba(194,161,74,.32)}
+  .veil p{color:var(--dim);max-width:300px;font-size:12px;line-height:1.8;letter-spacing:.03em}
+  .veil.hidden{display:none}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>MARIONETTE&nbsp;SYNDICATE</h1>
+    <span class="sub">금빛 궁정 위의 피와 그림자 · 2인 핫시트</span>
+    <div class="topbtns">
+      <label class="toggle"><input type="checkbox" id="debug"> REVEAL</label>
+      <button id="newmatch">NEW MATCH</button>
+    </div>
+  </header>
+
+  <div class="score">
+    <div class="side steel"><b>청 ─ BLUE</b><div class="pips" id="pipsBlue"></div></div>
+    <div class="mid">
+      <div>ROUND <b id="gameNo">1</b> · TURN <b id="turnNo">1</b></div>
+      <div class="turnname" id="turnName">청의 차례</div>
+      <div>AP <b id="apView">3</b> · 루렌 <b id="rurenView">0</b> <span id="incomeView"></span></div>
+    </div>
+    <div class="side blood"><b>RED ─ 적</b><div class="pips" id="pipsRed"></div></div>
+  </div>
+
+  <div class="layout">
+    <div class="boardwrap">
+      <div class="grid" id="grid"></div>
+      <div class="veil" id="veil">
+        <h2 id="veilTitle">청의 차례</h2>
+        <p>상대가 화면을 보지 못하게 한 뒤, 아래를 눌러 당신의 지령을 확인하세요.</p>
+        <button class="primary" id="veilBtn" style="padding:13px 32px;letter-spacing:.16em">지령 확인</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h3>SECRET ORDERS</h3>
+        <div class="orders">
+          <div class="order vip"><div class="lab">VIP · 보호</div><div class="who" id="vipName">—</div></div>
+          <div class="order tgt"><div class="lab">TARGET · 처형</div><div class="who" id="tgtName">—</div></div>
+        </div>
+        <div class="winprog">
+          <div id="wpTarget">타겟 처형</div>
+          <div id="wpVip">적 VIP 제거</div>
+        </div>
+        <div class="stats">
+          <span>내 농노 <b id="serfMe">0</b> · 수입 <b id="serfInc">0</b></span>
+          <span>청 <b id="aliveBlue">10</b> · 적 <b id="aliveRed">10</b></span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>ACTIONS</h3>
+        <div class="sel-info" id="selInfo">기물을 선택하세요.</div>
+        <div class="actions">
+          <button id="btnMove" disabled>이동 · 1AP</button>
+          <button id="btnExec" disabled>처형 · 1AP</button>
+          <button id="btnBribe" disabled>매수 · 1AP</button>
+          <button id="btnRoyal" disabled>왕가의 지휘 · 2AP</button>
+          <button class="primary wide" id="btnEnd">턴 종료</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>ROSTER</h3>
+        <div class="legend" id="legend"></div>
+        <div class="legnote">청 = 남색 / 적 = 자홍 · 점선 = 농노<br>매수 4턴째부터 · 처형 시 궁정 신문 보도</div>
+      </div>
+
+      <div class="panel">
+        <h3>궁정 연대기</h3>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const SVGNS='http://www.w3.org/2000/svg';
+const ICONS={
+  lord:'<path d="M4 16.5 L4 8 L8.5 11.5 L12 6 L15.5 11.5 L20 8 L20 16.5 Z"/><path d="M4.6 17.8 H19.4 V20.2 H4.6 Z"/>',
+  paladin:'<path fill-rule="evenodd" d="M12 2.2 L20 5.2 L20 11 C20 16 16.2 19.4 12 21.6 C7.8 19.4 4 16 4 11 L4 5.2 Z M11 7.5 H13 V10.8 H16 V12.8 H13 V16.6 H11 V12.8 H8 V10.8 H11 Z"/>',
+  assassin:'<path d="M12 1.5 L13.4 11 L10.6 11 Z"/><path d="M7.5 11 H16.5 V12.8 H7.5 Z"/><path d="M11 12.8 H13 V18.8 H11 Z"/><path d="M10.7 20.4 A1.3 1.3 0 1 1 13.3 20.4 A1.3 1.3 0 1 1 10.7 20.4 Z"/>',
+  spy:'<path fill-rule="evenodd" d="M2.5 12 C7 6.5 17 6.5 21.5 12 C17 17.5 7 17.5 2.5 12 Z M12 9.3 A2.7 2.7 0 1 0 12.01 9.3 Z"/>',
+  archer:'<path d="M7.6 2 C14 7 14 17 7.6 22 L9.7 22 C16 17 16 7 9.7 2 Z"/><path d="M5 11 H16.4 V9.4 L21 12 L16.4 14.6 V13 H5 Z"/>',
+  priest:'<path d="M10.4 3 H13.6 V8.6 H19 V11.8 H13.6 V21 H10.4 V11.8 H5 V8.6 H10.4 Z"/>',
+  serf:'<path d="M9.4 6.5 A2.6 2.6 0 1 1 14.6 6.5 A2.6 2.6 0 1 1 9.4 6.5 Z"/><path d="M9 9.6 Q12 8.4 15 9.6 L16.4 16 H7.6 Z"/><path d="M6.6 15.6 H17.4 V18.4 H6.6 Z"/>',
+};
+const iconSVG=type=>`<svg viewBox="0 0 24 24" fill="currentColor">${ICONS[type]}</svg>`;
+
+const TYPES={
+  lord:    {name:'군주', move:{p:'any', r:1}, exec:1, royal:true, court:true},
+  paladin: {name:'성기사', move:{p:'line', r:2}, exec:1, court:true},
+  assassin:{name:'자객', move:{p:'diag', r:3}, exec:2, court:true},
+  spy:     {name:'첩자', move:{p:'any', r:2}, exec:1, court:true},
+  archer:  {name:'궁수', move:{p:'line', r:1}, exec:3, court:true},
+  priest:  {name:'사제', move:{p:'any', r:1}, exec:0, court:true},
+  serf:    {name:'농노', move:{p:'any', r:1}, exec:0, serf:true},
+};
+const COURT=['archer','assassin','lord','priest','spy','paladin'];
+const SERFS=['serf','serf','serf','serf'];
+const DIRS={ any:[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]],
+  line:[[-1,0],[1,0],[0,-1],[0,1]], diag:[[-1,-1],[-1,1],[1,-1],[1,1]] };
+const N=10, BRIBE_BASE={serf:3,_court:6,lord:Infinity};
+const opp=f=>f==='blue'?'red':'blue';
+const fname=f=>f==='blue'?'청':'적';
+/* 구역 */
+const zoneOf=r=>(r<=1||r>=8)?'outer':(r<=3||r>=6)?'mid':'court';
+const ZONE={
+  outer:{cls:'zone-outer',names:['외곽 농지','변두리 마을','성문 밖 들녘']},
+  mid:{cls:'zone-mid',names:['성벽 회랑','중앙 연병장','회색 구역']},
+  court:{cls:'zone-court',names:['궁정 중심부','왕좌의 그림자','대회랑']},
+};
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+
+let S;
+function newMatch(){ S={scores:{blue:0,red:0},game:0}; newGame(); }
+function newGame(){
+  document.querySelectorAll('.broadcast').forEach(e=>e.remove());
+  S.game++;
+  const pieces={}, board=Array.from({length:N},()=>Array(N).fill(null));
+  let id=0;
+  const place=(faction,cr,sr)=>{
+    COURT.forEach((t,i)=>{const c=2+i,pid='p'+(id++);pieces[pid]={id:pid,type:t,faction,r:cr,c,alive:true};board[cr][c]=pid;});
+    SERFS.forEach((t,i)=>{const c=3+i,pid='p'+(id++);pieces[pid]={id:pid,type:t,faction,r:sr,c,alive:true};board[sr][c]=pid;});
+  };
+  place('blue',0,1); place('red',9,8);
+  const courtIds=f=>Object.values(pieces).filter(p=>p.faction===f&&!TYPES[p.type].serf).map(p=>p.id);
+  const rnd=a=>a[Math.floor(Math.random()*a.length)];
+  const orders={ blue:{vip:rnd(courtIds('blue')),target:rnd(courtIds('red'))},
+                 red:{vip:rnd(courtIds('red')),target:rnd(courtIds('blue'))} };
+  Object.assign(S,{board,pieces,orders,current:'blue',ap:3,turn:1,ruren:{blue:0,red:0},
+    selected:null,mode:null,rooted:new Set(),buffed:new Set(),reveal:false,over:false,busy:false,lastIncome:0});
+  log(`ROUND ${S.game} 개시. 지령 새로 배정.`,'gold');
+  startIncome(); render(); showVeil();
+}
+
+const cheby=(a,b)=>Math.max(Math.abs(a.r-b.r),Math.abs(a.c-b.c));
+const aliveOf=f=>Object.values(S.pieces).filter(p=>p.faction===f&&p.alive);
+const serfCount=f=>aliveOf(f).filter(p=>TYPES[p.type].serf).length;
+function effExec(p){let e=TYPES[p.type].exec; if(p.type==='paladin'&&S.buffed.has(p.id))e+=1; return e;}
+function reachable(p){const out=[],{p:pat,r:rng}=TYPES[p.type].move;
+  for(const [dr,dc] of DIRS[pat])for(let k=1;k<=rng;k++){const r=p.r+dr*k,c=p.c+dc*k;
+    if(r<0||r>=N||c<0||c>=N)break; if(S.board[r][c])break; out.push([r,c]);} return out;}
+function execTargets(p){const e=effExec(p); if(e<=0)return [];
+  return aliveOf(opp(p.faction)).filter(q=>cheby(p,q)<=e);}
+function bribeCost(actor,t){let b=TYPES[t.type].serf?BRIBE_BASE.serf:t.type==='lord'?BRIBE_BASE.lord:BRIBE_BASE._court;
+  if(actor.type==='spy')b-=3; return Math.max(2,b);}
+function bribeTargets(actor){ if(S.turn<4)return [];
+  return aliveOf(opp(actor.faction)).filter(q=>cheby(actor,q)===1&&bribeCost(actor,q)!==Infinity
+    &&S.ruren[actor.faction]>=bribeCost(actor,q));}
+
+function render(){
+  document.getElementById('gameNo').textContent=S.game;
+  document.getElementById('turnNo').textContent=S.turn;
+  const tn=document.getElementById('turnName');
+  tn.textContent=fname(S.current)+'의 차례'; tn.style.color=S.current==='blue'?'#9fb0c8':'#c98a6a';
+  document.getElementById('apView').textContent=S.ap;
+  document.getElementById('rurenView').textContent=S.ruren[S.current];
+  const iv=document.getElementById('incomeView');
+  iv.textContent=S.lastIncome?`(+${S.lastIncome})`:''; iv.style.color='#7d8f56';
+  for(const f of ['blue','red']){
+    const box=document.getElementById('pips'+(f==='blue'?'Blue':'Red')); box.innerHTML='';
+    for(let i=0;i<2;i++){const d=document.createElement('div');d.className='pip'+(S.scores[f]>i?' on':'');box.appendChild(d);}
+    document.getElementById('alive'+(f==='blue'?'Blue':'Red')).textContent=aliveOf(f).length;
+  }
+  const show=S.reveal||document.getElementById('debug').checked;
+  const o=S.orders[S.current];
+  setOrderName('vipName', show?S.pieces[o.vip].type:null);
+  setOrderName('tgtName', show?S.pieces[o.target].type:null);
+  const tgtDead=!S.pieces[o.target].alive, evDead=!S.pieces[S.orders[opp(S.current)].vip].alive;
+  const wt=document.getElementById('wpTarget'),wv=document.getElementById('wpVip');
+  wt.textContent=(tgtDead?'✓ ':'')+'타겟 처형'; wt.className=tgtDead?'done':'';
+  wv.textContent=(evDead?'✓ ':'')+'적 VIP 제거'; wv.className=evDead?'done':'';
+  document.getElementById('serfMe').textContent=serfCount(S.current);
+  document.getElementById('serfInc').textContent=serfCount(S.current)*2;
+
+  const grid=document.getElementById('grid'); grid.innerHTML='';
+  const moveSet=new Set(),shootSet=new Set(),bribeSet=new Set();
+  if(S.selected){const p=S.pieces[S.selected];
+    if(S.mode==='move')reachable(p).forEach(([r,c])=>moveSet.add(r+','+c));
+    if(S.mode==='exec')execTargets(p).forEach(q=>shootSet.add(q.id));
+    if(S.mode==='bribe')bribeTargets(p).forEach(q=>bribeSet.add(q.id));}
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++){
+    const cell=document.createElement('div'); cell.className='cell '+ZONE[zoneOf(r)].cls;
+    if(moveSet.has(r+','+c))cell.classList.add('move');
+    const pid=S.board[r][c];
+    if(pid){const p=S.pieces[pid];
+      const ord=S.orders[S.current];
+      const isTgt=show&&ord.target===pid;
+      const tok=document.createElement('div');
+      tok.className='tok '+p.faction+(TYPES[p.type].serf?' serf':'')+(p.id===S.selected?' sel':'')
+        +(shootSet.has(pid)?' targetable':'')+(bribeSet.has(pid)?' bribable':'')+(S.rooted.has(pid)?' rooted':'')
+        +(isTgt?' is-target':'');
+      tok.dataset.pid=pid; tok.innerHTML=iconSVG(p.type);
+      if(show&&ord.vip===pid)tok.insertAdjacentHTML('beforeend','<div class="ring-vip"></div><div class="chip vip">VIP</div>');
+      if(isTgt)tok.insertAdjacentHTML('beforeend','<div class="chip tgt">표적</div>');
+      tok.onclick=e=>{e.stopPropagation();onPieceClick(pid);};
+      cell.appendChild(tok);
+    }
+    cell.onclick=()=>onCellClick(r,c);
+    grid.appendChild(cell);
+  }
+  const sel=S.selected?S.pieces[S.selected]:null, mine=sel&&sel.faction===S.current&&sel.alive;
+  document.getElementById('btnMove').disabled=!(mine&&S.ap>=1&&!S.rooted.has(sel?.id)&&reachable(sel).length);
+  document.getElementById('btnExec').disabled=!(mine&&S.ap>=1&&execTargets(sel).length);
+  document.getElementById('btnBribe').disabled=!(mine&&S.ap>=1&&bribeTargets(sel).length);
+  document.getElementById('btnRoyal').disabled=!(mine&&TYPES[sel.type].royal&&S.ap>=2);
+  const info=document.getElementById('selInfo');
+  if(sel){const t=TYPES[sel.type];
+    info.innerHTML=`<b>${t.name}</b> · ${fname(sel.faction)} · 이동 ${t.move.p==='any'?'전방향':t.move.p==='line'?'직선':'대각'} ${t.move.r} · 처형거리 ${effExec(sel)}`
+      +(TYPES[sel.type].serf?' · 경제/매수대상':'')+(S.rooted.has(sel.id)?' · 구속됨':'');
+  } else info.textContent='기물을 선택하세요.';
+}
+function setOrderName(elId,type){const el=document.getElementById(elId);
+  el.innerHTML = type? iconSVG(type)+' '+TYPES[type].name : '— 확인 전 —';}
+
+function onPieceClick(pid){
+  if(S.over||S.busy)return; const p=S.pieces[pid];
+  if(S.selected&&S.mode==='exec'){const me=S.pieces[S.selected];
+    if(me.faction===S.current&&execTargets(me).some(q=>q.id===pid)){doExec(me,p);return;}}
+  if(S.selected&&S.mode==='bribe'){const me=S.pieces[S.selected];
+    if(me.faction===S.current&&bribeTargets(me).some(q=>q.id===pid)){doBribe(me,p);return;}}
+  if(p.faction===S.current&&p.alive){S.selected=pid;S.mode=null;render();}
+}
+function onCellClick(r,c){
+  if(S.over||S.busy||!S.selected)return;
+  if(S.mode==='move'){const p=S.pieces[S.selected];
+    if(reachable(p).some(([rr,cc])=>rr===r&&cc===c))doMove(p,r,c);}
+}
+
+const tokenEl=pid=>document.querySelector(`.tok[data-pid="${pid}"]`);
+function centerOf(el,host){const a=el.getBoundingClientRect(),b=host.getBoundingClientRect();
+  return {x:a.left-b.left+a.width/2,y:a.top-b.top+a.height/2};}
+function animateAttack(att,vic,done){
+  S.busy=true;
+  const host=document.querySelector('.boardwrap');
+  const aEl=tokenEl(att.id),vEl=tokenEl(vic.id);
+  const pa=centerOf(aEl,host),pv=centerOf(vEl,host);
+  const svg=document.createElementNS(SVGNS,'svg'); svg.setAttribute('class','fx');
+  const ln=document.createElementNS(SVGNS,'line');
+  ln.setAttribute('x1',pa.x);ln.setAttribute('y1',pa.y);ln.setAttribute('x2',pv.x);ln.setAttribute('y2',pv.y);
+  ln.setAttribute('class','strike'); svg.appendChild(ln);
+  const sp=document.createElementNS(SVGNS,'circle');
+  sp.setAttribute('cx',pv.x);sp.setAttribute('cy',pv.y);sp.setAttribute('class','spark');
+  svg.appendChild(sp); host.appendChild(svg);
+  vEl.classList.add('dying');
+  setTimeout(()=>{svg.remove(); done(); S.busy=false;},560);
+}
+function animateBribe(actor,target,done){
+  S.busy=true; const vEl=tokenEl(target.id); vEl.classList.add('flipping');
+  setTimeout(()=>{done(); S.busy=false;},480);
+}
+
+/* 궁정 신문 — 공개:누가 / 제한:어디서 / 비공개:누가 했나 */
+function courtBroadcast(vic){
+  const z=ZONE[zoneOf(vic.r)], place=pick(z.names);
+  const isVIP=S.orders[vic.faction].vip===vic.id, serf=TYPES[vic.type].serf;
+  let tag='긴급 보도', title, body;
+  if(isVIP){ title='암살 확인';
+    body=`${place}에서 궁정의 핵심 인물이 쓰러졌다. 명백한 암살이며, 궁정은 깊은 충격에 휩싸였다.`; }
+  else if(serf){ title='실종 처리';
+    body=pick([`${place}의 농노 하나가 자취를 감추었다. 누구도 그 행방을 묻지 않았다.`,
+      `${place}에서 이름 없는 노동자가 사라졌다. 장부에서 한 줄이 지워졌을 뿐이다.`]); }
+  else { title='전사 보도';
+    body=pick([`${place}에서 ${TYPES[vic.type].name}이(가) 갑작스러운 습격으로 생을 마감하였다. 현장에 흔적은 없었고, 범인은 확인되지 않았다.`,
+      `${place}에서 한 ${TYPES[vic.type].name}이(가) 차갑게 식은 채 발견되었다. 목격자는 없었다.`,
+      `${place}, ${TYPES[vic.type].name}의 죽음이 보고되었다. 궁정은 침묵으로 답했다.`]); }
+  const host=document.querySelector('.boardwrap');
+  document.querySelectorAll('.broadcast').forEach(e=>e.remove());
+  const card=document.createElement('div'); card.className='broadcast';
+  card.innerHTML=`<div class="bc-tag">${tag}</div><h4>${title}</h4><div class="bc-rule"></div>
+    <p>${body}</p><div class="bc-foot"><span>궁정 신문</span><span>범인 미상</span></div>`;
+  card.onclick=()=>card.remove();
+  host.appendChild(card);
+  setTimeout(()=>{ if(card.parentNode)card.remove(); },4200);
+  log(`[속보] ${title} — ${place}.`,'news');
+}
+
+function doMove(p,r,c){S.board[p.r][p.c]=null;p.r=r;p.c=c;S.board[r][c]=p.id;S.ap-=1;S.mode=null;
+  log(`${fname(p.faction)} ${TYPES[p.type].name} 이동.`); render();}
+function doExec(att,vic){
+  S.ap-=1; S.mode=null;
+  animateAttack(att,vic,()=>{
+    vic.alive=false; S.board[vic.r][vic.c]=null; S.selected=null;
+    log(`${fname(att.faction)} ${TYPES[att.type].name} → ${fname(vic.faction)} ${TYPES[vic.type].name} 처형.`,'kill');
+    if(S.orders[vic.faction].vip===vic.id)
+      log(`★ ${fname(vic.faction)}의 ${TYPES[vic.type].name}는 VIP였다.`,'gold');
+    courtBroadcast(vic);
+    const o=S.orders[att.faction];
+    if(!S.pieces[o.target].alive && !S.pieces[S.orders[opp(att.faction)].vip].alive)
+      return winGame(att.faction,'타겟 처형 + 적 VIP 제거');
+    render();
+  });
+}
+function doBribe(actor,target){
+  const cost=bribeCost(actor,target);
+  animateBribe(actor,target,()=>{
+    S.ruren[actor.faction]-=cost; S.ap-=1; S.mode=null;
+    const was=target.faction; target.faction=actor.faction;
+    log(`${fname(actor.faction)} ${TYPES[actor.type].name}가 ${fname(was)} ${TYPES[target.type].name} 매수. (-${cost}루렌)`,'gold');
+    S.selected=null; render();
+  });
+}
+function doRoyal(){const lord=S.pieces[S.selected]; S.ap-=2;
+  for(const [dr,dc] of DIRS.any){const pid=S.board[lord.r+dr]?.[lord.c+dc]; if(!pid)continue;
+    const q=S.pieces[pid]; if(q.faction!==lord.faction)S.rooted.add(q.id);
+    else if(q.type==='paladin')S.buffed.add(q.id);}
+  log(`${fname(S.current)} 군주 '왕가의 지휘'. 주변 적 구속·성기사 강화.`,'gold'); S.mode=null; render();}
+function startIncome(){const inc=serfCount(S.current)*2; S.ruren[S.current]+=inc; S.lastIncome=inc;
+  if(inc)log(`${fname(S.current)} 농노 수입 +${inc}루렌.`);}
+function endTurn(){if(S.over||S.busy)return;
+  S.current=opp(S.current);S.ap=3;S.turn++;S.selected=null;S.mode=null;
+  for(const id of [...S.rooted])if(S.pieces[id].faction===S.current)S.rooted.delete(id);
+  for(const id of [...S.buffed])if(S.pieces[id].faction===S.current)S.buffed.delete(id);
+  startIncome(); render(); showVeil();}
+function winGame(faction,reason){
+  S.scores[faction]++; S.over=true;
+  log(`▣ ${fname(faction)} 라운드 승리 — ${reason}. (${S.scores.blue}:${S.scores.red})`,'win'); render();
+  setTimeout(()=>{
+    if(S.scores[faction]>=2){alert(`${fname(faction)} 신디케이트 매치 승리. (${S.scores.blue} : ${S.scores.red})`);newMatch();}
+    else{alert(`${fname(faction)} 라운드 승리 — ${reason}\n현재 ${S.scores.blue} : ${S.scores.red}`);newGame();}
+  },1500);
+}
+
+function showVeil(){
+  if(document.getElementById('debug').checked){S.reveal=true;render();return;}
+  S.reveal=false;
+  document.getElementById('veilTitle').textContent=fname(S.current)+'의 차례';
+  document.getElementById('veil').classList.remove('hidden'); render();
+}
+document.getElementById('veilBtn').onclick=()=>{S.reveal=true;document.getElementById('veil').classList.add('hidden');render();};
+
+function log(msg,cls=''){const el=document.getElementById('log');
+  const d=document.createElement('div');d.className=cls;d.textContent='· '+msg;el.appendChild(d);el.scrollTop=el.scrollHeight;}
+function buildLegend(){const L=document.getElementById('legend');
+  [...COURT,'serf'].forEach(t=>{const d=document.createElement('div');d.className='li';
+    d.innerHTML=`<span class="mini">${iconSVG(t)}</span>${TYPES[t].name}`;L.appendChild(d);});}
+document.getElementById('btnMove').onclick=()=>{S.mode='move';render();};
+document.getElementById('btnExec').onclick=()=>{S.mode='exec';render();};
+document.getElementById('btnBribe').onclick=()=>{S.mode='bribe';render();};
+document.getElementById('btnRoyal').onclick=doRoyal;
+document.getElementById('btnEnd').onclick=endTurn;
+document.getElementById('newmatch').onclick=newMatch;
+document.getElementById('debug').onchange=()=>{if(document.getElementById('debug').checked){S.reveal=true;document.getElementById('veil').classList.add('hidden');}render();};
+
+buildLegend(); newMatch();
+</script>
+</body>
+</html>

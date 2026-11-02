@@ -1,14 +1,31 @@
 {
-  "name": "nudge",
+  "name": "marionette-syndicate",
   "version": "0.1.0",
   "private": true,
-  "description": "밀 때 40 N, 당길 때 60 N뿐인 약한 마우스 포인터가 세상의 힘을 빌려 벽을 부수고 열쇠 조각을 모으는 물리 퍼즐 세계",
+  "description": "중세 궁정 암투 1대1 온라인 심리전 보드게임",
+  "type": "module",
   "scripts": {
-    "test": "node tests/physics.test.js && node tests/nudge.test.js",
-    "test:physics": "node tests/physics.test.js",
-    "test:nudge": "node tests/nudge.test.js",
-    "build": "node tools/build.js",
-    "start": "npx --yes serve ."
+    "dev": "concurrently -k -n server,client \"tsx watch src/server/main.ts\" \"vite\"",
+    "build": "vite build && esbuild src/server/main.ts --bundle --platform=node --format=esm --packages=external --outfile=dist-server/main.js",
+    "start": "node dist-server/main.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@fontsource/cinzel": "^5.2.8",
+    "@fontsource/nanum-myeongjo": "^5.2.8",
+    "pixi.js": "^8.13.2",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.12",
+    "@types/ws": "^8.18.1",
+    "concurrently": "^9.2.1",
+    "esbuild": "^0.25.11",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.12",
+    "vitest": "^3.2.4"
+  }
 }
