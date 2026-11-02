@@ -251,8 +251,34 @@ export function paintBoard(displayRow: (r: number) => number, coords: boolean): 
     for (let r = 0; r < N; r++) {
       const y = frame + displayRow(r) * cell + cell / 2 + 2;
       ctx.fillText(String(r + 1), frame / 2 + 2, y);
-      ctx.fillText(String(r + 1), size - frame / 2 - 2, y);
     }
+  }
+  // 오른쪽 틀: 두 줄씩 묶은 구역 이름 (구역마다 규칙이 다르므로 늘 보이게)
+  const bands: { rows: [number, number]; label: string; color: string }[] = [
+    { rows: [0, 1], label: '외곽', color: 'rgba(170,190,130,0.85)' },
+    { rows: [2, 3], label: '전장', color: 'rgba(200,196,186,0.8)' },
+    { rows: [4, 5], label: '궁정', color: 'rgba(234,210,140,0.95)' },
+    { rows: [6, 7], label: '전장', color: 'rgba(200,196,186,0.8)' },
+    { rows: [8, 9], label: '외곽', color: 'rgba(170,190,130,0.85)' },
+  ];
+  for (const b of bands) {
+    const y0 = frame + Math.min(displayRow(b.rows[0]), displayRow(b.rows[1])) * cell;
+    const x = size - frame / 2;
+    // 두 줄을 잇는 가는 금선과, 가운데의 구역 이름 (가로로, 위아래 두 글자)
+    ctx.strokeStyle = 'rgba(194,161,74,0.4)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(x, y0 + 8); ctx.lineTo(x, y0 + cell * 2 - 8); ctx.stroke();
+    ctx.fillStyle = '#2a1f16';
+    ctx.fillRect(x - frame * 0.36, y0 + cell - cell * 0.42, frame * 0.72, cell * 0.84);
+    ctx.strokeStyle = 'rgba(194,161,74,0.35)';
+    ctx.strokeRect(x - frame * 0.36, y0 + cell - cell * 0.42, frame * 0.72, cell * 0.84);
+    ctx.fillStyle = b.color;
+    ctx.font = `800 ${Math.round(cell * 0.27)}px "Nanum Myeongjo", serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const [c1, c2] = b.label.split('');
+    ctx.fillText(c1, x, y0 + cell - cell * 0.17);
+    ctx.fillText(c2, x, y0 + cell + cell * 0.19);
   }
   grain(ctx, size, size, 14, 99);
   return cv;

@@ -63,11 +63,16 @@ export class LocalLink implements Link {
     if (this.aiTimer) clearTimeout(this.aiTimer);
     this.aiTimer = null;
     const v = m.view;
+    if (v.phase === 'deploy') {
+      // 배치는 사람과 동시에 한다. 사람이 지령서를 읽는 동안 조용히 놓는다.
+      if (!v.deployed[v.you]) this.aiTimer = setTimeout(() => this.think(v), 1200);
+      return;
+    }
     if (!isMyTurn(v)) return;
     // 사람이 연출을 따라올 수 있게 잠시 생각하는 척한다
-    const roundStart = m.events.some((e) => e.type === 'round_start');
+    const roundStart = m.events.some((e) => e.type === 'round_start' || e.type === 'reveal');
     const turnStart = m.events.some((e) => e.type === 'turn_start');
-    const delay = roundStart ? 5200 : (turnStart ? 1500 : 650) + m.events.length * 380;
+    const delay = roundStart ? 2600 : (turnStart ? 1500 : 650) + m.events.length * 380;
     this.aiTimer = setTimeout(() => this.think(v), delay);
   }
 

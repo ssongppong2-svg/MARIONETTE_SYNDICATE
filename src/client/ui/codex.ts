@@ -1,6 +1,7 @@
 /** 규칙 책과 설정 창 */
 import {
-  ABILITY_INFO, AXIS_NAME, BRIBE_COST, CARDS, MAX_TURNS_EACH, PIECES, SPY_DISCOUNT, TIMEOUTS_TO_LOSE, TURN_SECONDS,
+  ABILITY_INFO, AXIS_NAME, BRIBE_COST, CARDS, COURT_EVENT_EVERY, COURT_EVENTS, DECK_COPIES, DEPLOY_SECONDS, HAND_LIMIT,
+  MARKET_PRICE, MARKET_SIZE, MAX_TURNS_EACH, PIECES, RESTOCK_EVERY, SPY_DISCOUNT, TIMEOUTS_TO_LOSE, TURN_SECONDS,
 } from '../../shared/data';
 import type { CardId, PieceType } from '../../shared/types';
 import { pieceSvg, uiSvg } from '../icons';
@@ -28,6 +29,16 @@ const SECTIONS: { id: string; title: string; body: () => string }[] = [
       <p>상대가 내 VIP를 <b>확실히</b> 알게 되면 '노출'되고, 나에게만 알림이 온다. 노출되면 <b>암살 후 변경</b> 카드로 VIP를 바꿀 수 있다.</p>`,
   },
   {
+    id: 'deploy', title: '배치와 구역',
+    body: () => `
+      <p>판이 시작되면 지령서를 읽고, <b>상대가 못 보게</b> 자기 진영 두 줄 안에 기물을 놓는다. 두 사람이 모두 마치면 상대 진영이 드러난다. 온라인에서는 ${DEPLOY_SECONDS}초 안에 마쳐야 하고, 시간이 지나면 놓인 그대로 시작한다.</p>
+      <table><tr><th>구역</th><th>줄</th><th>규칙</th></tr>
+      <tr><td>외곽</td><td>양 끝 두 줄</td><td>농노는 <b>외곽에 있을 때만</b> 차례마다 2 루렌을 낸다</td></tr>
+      <tr><td>전장</td><td>그다음 두 줄</td><td>부딪히는 곳</td></tr>
+      <tr><td>궁정</td><td>가운데 두 줄</td><td>여기 선 내 궁정 기물 하나마다 차례마다 <b>영향력 1 루렌</b></td></tr></table>
+      <p class="muted">구역 이름은 보드 오른쪽 틀에 새겨져 있다.</p>`,
+  },
+  {
     id: 'turn', title: '차례',
     body: () => `
       <p>차례마다 <b>AP 3</b>을 받는다. 남은 AP는 사라진다. 차례는 ${TURN_SECONDS}초. ${TIMEOUTS_TO_LOSE}번 연속으로 넘기면 그 판을 진다.</p>
@@ -36,17 +47,21 @@ const SECTIONS: { id: string; title: string; body: () => string }[] = [
       <tr><td>처형</td><td>1</td><td>사거리 안의 적이 즉시 죽는다. HP는 없다. 상대는 누가 죽였는지 모른다</td></tr>
       <tr><td>매수</td><td>1</td><td>자기 4번째 차례부터. 붙어 있는 적을 루렌으로 내 편으로</td></tr>
       <tr><td>카드</td><td>카드별</td><td>차례마다 한 장</td></tr>
-      <tr><td>특수 능력</td><td>1~2</td><td>군주·첩자·사제</td></tr></table>
+      <tr><td>상점</td><td>1</td><td>${MARKET_PRICE} 루렌으로 카드 한 장 (차례마다 한 장)</td></tr>
+      <tr><td>특수 능력</td><td>1~2</td><td>군주·첩자·궁수·사제</td></tr></table>
       <p class="muted">조작: 내 기물을 누르면 갈 수 있는 칸(◇)과 칠 수 있는 적(붉은 모서리)이 보인다. 적을 누르면 처형·매수·심문을 고른다. 오른쪽 클릭이나 <span class="kbd">Esc</span>로 취소, <span class="kbd">E</span>로 차례 종료.</p>`,
   },
   {
     id: 'pieces', title: '기물',
     body: () => `
-      <table><tr><th>기물</th><th>이동</th><th>처형</th><th>특징</th></tr>
+      <table><tr><th>기물</th><th>이동</th><th>처형</th><th>능력</th></tr>
       ${PIECE_ORDER.map((t) => {
         const p = PIECES[t];
-        const ab = p.ability ? `<b>${ABILITY_INFO[p.ability].name}</b> (${ABILITY_INFO[p.ability].ap} AP): ${ABILITY_INFO[p.ability].text}` : p.role;
-        return `<tr><td>${pieceSvg(t)}${p.name}</td><td>${MOVE_NAME[p.move.pattern]} ${p.move.range}</td><td>${p.exec || '—'}</td><td>${ab}</td></tr>`;
+        const parts: string[] = [];
+        if (p.ability) parts.push(`<b>${ABILITY_INFO[p.ability].name}</b> (${ABILITY_INFO[p.ability].ap} AP): ${ABILITY_INFO[p.ability].text}`);
+        if (p.passive) parts.push(`<b>${p.passive.name}</b>: ${p.passive.text}`);
+        if (!parts.length) parts.push(p.role);
+        return `<tr><td>${pieceSvg(t)}${p.name}</td><td>${MOVE_NAME[p.move.pattern]} ${p.move.range}</td><td>${p.exec || '—'}</td><td>${parts.join('<br>')}</td></tr>`;
       }).join('')}</table>
       <p class="muted">처형 사거리는 상하좌우·대각선 모두 같은 거리로 센다. 진영마다 궁정 기물 6, 농노 4.</p>`,
   },
@@ -63,7 +78,8 @@ const SECTIONS: { id: string; title: string; body: () => string }[] = [
   {
     id: 'cards', title: '카드',
     body: () => `
-      <p>판마다 5장: <b>암살 후 변경</b> 1장은 항상, 나머지 4장은 무작위. 차례마다 한 장. <b>비밀</b> 카드는 상대에게 "봉인된 칙령이 집행되었다"로만 보인다.</p>
+      <p>판마다 5장: <b>암살 후 변경</b> 1장은 항상, 나머지 4장은 내 덱에서. 덱에는 나머지 카드가 종류마다 ${DECK_COPIES}장씩 있다. 카드는 차례마다 한 장 쓴다. <b>비밀</b> 카드는 상대에게 "봉인된 칙령이 집행되었다"로만 보인다.</p>
+      <p><b>궁정 상점</b>: 내 덱에서 ${MARKET_SIZE}장이 펼쳐져 있고 나만 본다. 1 AP와 ${MARKET_PRICE} 루렌으로 한 장을 산다(차례마다 한 장, 손패는 ${HAND_LIMIT}장까지). 자기 차례 ${RESTOCK_EVERY}번마다 상점이 새 카드로 바뀐다(재입고).</p>
       <div class="cards-grid">${(Object.keys(CARDS) as CardId[]).map((id) => {
         const c = CARDS[id];
         return `<div><b>${c.name}</b><span class="muted">${AXIS_NAME[c.axis]} · ${c.cost} 루렌 · ${c.ap} AP${c.secret ? ' · 비밀' : ''}</span><br>${c.text}</div>`;
@@ -77,7 +93,9 @@ const SECTIONS: { id: string; title: string; body: () => string }[] = [
       <tr><td class="gold">공개</td><td>누가 죽었는가</td></tr>
       <tr><td class="blood">제한</td><td>어디서 죽었는가 — 구역의 지명만</td></tr>
       <tr><td class="muted">비공개</td><td>누가 죽였는가</td></tr></table>
-      <p><b>검열</b> 카드를 걸어 두면, 내 기물이 처형될 때 지면이 검게 칠해지고 그 기물이 VIP였는지도 상대가 알 수 없다.</p>`,
+      <p><b>검열</b> 카드를 걸어 두면, 내 기물이 처형될 때 지면이 검게 칠해지고 그 기물이 VIP였는지도 상대가 알 수 없다.</p>
+      <p><b>궁정 사건</b>: 전체 차례 ${COURT_EVENT_EVERY}번마다 궁정 공고가 나와 판을 흔든다.</p>
+      <ul>${Object.values(COURT_EVENTS).map((e) => `<li><b>${e.name}</b> — ${e.text}</li>`).join('')}</ul>`,
   },
 ];
 

@@ -297,7 +297,7 @@ button, input { font: inherit; color: inherit; }
 .note .warn { font-size: 11.5px; color: var(--muted); }
 
 /* 아래: AP, 선택한 기물, 손패, 차례 종료 */
-.bottom { grid-area: bottom; display: grid; grid-template-columns: auto minmax(280px, 400px) 1fr auto; align-items: end; gap: 14px; min-height: 0; }
+.bottom { grid-area: bottom; display: grid; grid-template-columns: auto minmax(280px, 400px) 1fr auto auto; align-items: end; gap: 14px; min-height: 0; }
 .ap { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 14px; }
 .ap .gems { display: flex; gap: 6px; }
 .gem { width: 18px; height: 18px; transform: rotate(45deg); border: 1px solid var(--gold-lo); background: rgba(0,0,0,.4); transition: background .2s, box-shadow .2s; }
@@ -326,7 +326,12 @@ button, input { font: inherit; color: inherit; }
 .card:hover, .card.focus { transform: translateY(-26px) scale(1.06); z-index: 3; box-shadow: 0 18px 30px rgba(0,0,0,.65), inset 0 0 0 3px #e9dfc4, inset 0 0 0 4px var(--gold); }
 .card.disabled { filter: grayscale(0.75) brightness(0.62); }
 .card.signature { background: linear-gradient(180deg, #e9d79f, #c6a95c); }
-.card .axis { font-size: 9.5px; letter-spacing: 0.18em; font-weight: 800; color: #6b5636; }
+.card .axis { align-self: stretch; margin: -10px -8px 0; padding: 4px 0 3px; border-radius: 5px 5px 0 0; font-size: 9.5px; letter-spacing: 0.22em; font-weight: 800; color: #f3ead4; background: #6b5636; box-shadow: inset 0 -1px 0 rgba(0,0,0,.35); }
+.card.axis-intel .axis, .mcard.axis-intel .mtop { background: linear-gradient(180deg, #3d5378, #253550); }
+.card.axis-economy .axis, .mcard.axis-economy .mtop { background: linear-gradient(180deg, #5d6b47, #3c4630); }
+.card.axis-loyalty .axis, .mcard.axis-loyalty .mtop { background: linear-gradient(180deg, #a8873a, #6e5524); }
+.card.axis-assassination .axis, .mcard.axis-assassination .mtop { background: linear-gradient(180deg, #8a2222, #5a0f0f); }
+.card.signature .axis { background: linear-gradient(180deg, #7a1212, #4a0a0a); }
 .card .cname { font-weight: 800; font-size: 15px; line-height: 1.25; margin: 6px 0 2px; word-break: keep-all; }
 .card .cico { width: 52px; height: 52px; margin: 10px 0 2px; color: #3a2c18; display: grid; place-items: center; border-radius: 50%; background: radial-gradient(circle, rgba(255,250,235,.55), transparent 70%); }
 .card .cico .ico { width: 40px; height: 40px; }
@@ -339,6 +344,35 @@ button, input { font: inherit; color: inherit; }
 .card .ctext { font-size: 10.5px; line-height: 1.35; color: #4a3d28; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 .hand-empty { color: var(--muted); font-size: 13px; padding: 0 14px 18px; }
 .endturn { min-height: 64px; min-width: 150px; font-size: 17px; margin-bottom: 4px; }
+/* 궁정 상점 칸: 카드 뒷면처럼 */
+.market-tile {
+  position: relative; width: 104px; height: 140px; margin-bottom: 4px; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 8px;
+  border-radius: 6px; border: 1px solid var(--gold-lo); color: var(--ivory);
+  background:
+    repeating-linear-gradient(45deg, rgba(194,161,74,.07) 0 6px, transparent 6px 12px),
+    radial-gradient(circle at 50% 35%, #3a2440, #1a1020 75%);
+  box-shadow: 0 8px 20px rgba(0,0,0,.55), inset 0 0 0 3px #150d18, inset 0 0 0 4px rgba(194,161,74,.45);
+  transition: transform .18s var(--ease), box-shadow .18s;
+}
+.market-tile:hover:not(:disabled) { transform: translateY(-6px); box-shadow: 0 14px 26px rgba(0,0,0,.6), inset 0 0 0 3px #150d18, inset 0 0 0 4px var(--gold); }
+.market-tile:disabled { opacity: .5; cursor: default; }
+.market-tile.ready { box-shadow: 0 8px 20px rgba(0,0,0,.55), 0 0 0 1px var(--gold), inset 0 0 0 3px #150d18, inset 0 0 0 4px var(--gold); }
+.market-tile .mt-ico .ico { width: 34px; height: 34px; color: var(--gold-hi); }
+.market-tile .mt-title { font-weight: 800; font-size: 14px; }
+.market-tile .mt-sub { font-size: 10.5px; color: var(--ivory-dim); text-align: center; line-height: 1.3; }
+.market-pop { width: min(600px, calc(100vw - 16px)); }
+.market-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 6px 4px; }
+.mcard { display: flex; flex-direction: column; gap: 6px; padding: 0 0 10px; border-radius: 5px; overflow: hidden;
+  background: linear-gradient(180deg, #e3d9be, #c9bc96); color: #2a2015; border: 1px solid #7a6a45; }
+.mcard .mtop { display: flex; justify-content: space-between; padding: 4px 8px; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; color: #f3ead4; background: #6b5636; }
+.mcard .mname { display: flex; align-items: center; gap: 6px; padding: 0 10px; font-weight: 800; font-size: 15px; }
+.mcard .mname .ico { width: 20px; height: 20px; color: #3a2c18; }
+.mcard p { margin: 0; padding: 0 10px; font-size: 12px; line-height: 1.45; color: #4a3d28; flex: 1; }
+.mcard .btn { margin: 0 10px; }
+.market-foot { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 12px; padding: 6px 6px 2px; border-top: 1px solid var(--line-soft); }
+.selbox .stats.passive { color: var(--ivory-dim); }
+.selbox .stats.passive b { color: var(--gold-hi); margin-right: 4px; }
 .endturn .sub { display: block; font-size: 11px; font-family: var(--display); letter-spacing: 0.2em; opacity: 0.7; }
 
 /* ── 띄우는 것들 ─────────────────────────── */
@@ -512,7 +546,10 @@ input[type='range'] { accent-color: var(--gold); width: 180px; }
   .center-info { align-items: flex-start; text-align: left; }
   .round-label .rscore { display: inline; color: var(--ivory-dim); }
   .top-actions .btn.icon { width: 36px; min-height: 36px; }
-  .bottom { grid-template-columns: auto 1fr; grid-template-areas: 'ap end' 'sel sel' 'hand hand'; }
+  .bottom { grid-template-columns: auto 1fr auto; grid-template-areas: 'ap market end' 'sel sel sel' 'hand hand hand'; }
+  .bottom .market-tile { grid-area: market; justify-self: end; width: auto; height: 64px; flex-direction: row; padding: 6px 12px; }
+  .market-tile .mt-sub { display: none; }
+  .market-row { grid-template-columns: 1fr; }
   .bottom .ap { grid-area: ap; }
   .bottom .selbox { grid-area: sel; }
   .bottom .hand { grid-area: hand; overflow-x: auto; height: auto; padding: 30px 6px 6px; }
@@ -525,6 +562,8 @@ input[type='range'] { accent-color: var(--gold); width: 180px; }
   .codex { grid-template-columns: 1fr; }
   .codex nav { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--line-soft); padding: 0 0 8px; }
   .toast-stack { top: 64px; }
+  .targeting { left: 8px; right: 8px; top: 8px; transform: none; white-space: normal; flex-wrap: wrap; gap: 8px; padding: 8px 10px; }
+  .targeting .msg { flex: 1 1 100%; font-size: 13.5px; }
   .news-card { left: 10px; right: 10px; top: 10px; width: auto; padding: 10px 14px 8px; }
   .news-card h4 { font-size: 18px; margin-bottom: 4px; }
   .news-card p { font-size: 12.5px; line-height: 1.5; }

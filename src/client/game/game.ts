@@ -3,15 +3,16 @@
  * 판정은 하지 않습니다 — 버튼과 강조 표시는 서버와 같은 규칙 함수(shared/rules)로 계산합니다.
  */
 import {
-  ABILITY_INFO, AXIS_NAME, CARDS, FACTION_NAME, INCOME_PER_SERF, PIECES, TURN_SECONDS, WINS_TO_TAKE_MATCH,
+  ABILITY_INFO, AXIS_NAME, CARDS, COURT_EVENTS, COURT_INFLUENCE, DEPLOY_SECONDS, FACTION_NAME, HAND_LIMIT, HOME_ROWS,
+  INCOME_PER_SERF, MARKET_PRICE, PIECES, SNIPE_RANGE, TURN_SECONDS, WINS_TO_TAKE_MATCH, zoneOf,
 } from '../../shared/data';
 import { josa, particle } from '../../shared/korean';
 import type { MatchInfo, OpponentStatus, ServerMsg } from '../../shared/protocol';
 import {
-  blessTargets, bribeOpen, bribeOptions, cardChoices, cardProblem, execRange, execTargets, interrogateTargets,
-  isMyTurn, pieceAt, pieceById, reachable, royalEffect, shadowCells,
+  blessTargets, bribeOpen, bribeOptions, buyProblem, cardChoices, cardProblem, execRange, execTargets, guarded,
+  homeCells, interrogateTargets, isMyTurn, pieceAt, pieceById, reachable, royalEffect, shadowCells, snipeTargets,
 } from '../../shared/rules';
-import type { Action, CardId, Faction, GameEvent, NewsItem, Orders } from '../../shared/types';
+import type { Action, CardId, Cell, Faction, GameEvent, NewsItem, Orders } from '../../shared/types';
 import { other } from '../../shared/types';
 import type { PlayerView, ViewPiece } from '../../shared/view';
 import { audio } from '../audio';
@@ -23,7 +24,7 @@ import { openCodex, openSettings } from '../ui/codex';
 import { $, confirmBox, el, esc, fmtClock, modal, placeNear, roman, toast } from '../ui/dom';
 
 type Mode =
-  | { kind: 'bribe' | 'interrogate' | 'bless'; piece: string }
+  | { kind: 'bribe' | 'interrogate' | 'bless' | 'snipe'; piece: string }
   | { kind: 'card'; card: CardId; picks: string[]; assassin: string | null };
 
 type StateMsg = Extract<ServerMsg, { t: 'state' }>;
@@ -34,6 +35,9 @@ const CARD_ICON: Record<CardId, UiIcon> = {
 };
 
 const pname = (t: ViewPiece['type'], militia = false) => (militia ? '민병' : PIECES[t].name);
+const ZONE_NAME = { outer: '외곽', mid: '전장', court: '궁정' } as const;
+/** 손가락으로 두는 화면: 떠 있는 설명 대신 아래 칸의 기물 정보를 쓴다 */
+const TOUCH = typeof matchMedia === 'function' && matchMedia('(hover: none)').matches;
 const label = (v: PlayerView, p: { type: ViewPiece['type']; owner: Faction; militia?: boolean }) =>
   `${p.owner === v.you ? '내' : '상대'} ${pname(p.type, p.militia)}`;
 
@@ -47,6 +51,8 @@ export class GameScreen {
   private graceUntil: number | null = null;
   private selected: string | null = null;
   private mode: Mode | null = null;
+  /** 배치 단계에서 내가 고치고 있는 자리 (보내기 전까지는 이 화면에만 있다) */
+  private deployLayout: Record<string, Cell> | null = null;
   private pending = false;
   /** 사건 연출을 재생하는 중 — 이때의 클릭은 지난 상태를 기준으로 하므로 받지 않는다 */
   private animating = false;
@@ -143,13 +149,17 @@ export class GameScreen {
       <div class="ap frame"><div class="gems" data-gems></div><div class="lbl">AP</div></div>
       <div class="selbox frame" data-sel></div>
       <div class="hand" data-hand></div>
+      <button class="market-tile" data-act="market" aria-label="궁정 상점">
+        <span class="mt-ico">${uiSvg('coin')}</span><span class="mt-title">궁정 상점</span><span class="mt-sub" data-market-sub></span>
+      </button>
       <button class="btn primary endturn" data-act="end">차례 종료<span class="sub">E</span></button>
     </footer>`;
   }
 
   private wire() {
     const on = (sel: string, fn: () => void) => $(this.root, sel).addEventListener('click', () => { audio.play('click'); fn(); });
-    on('[data-act="end"]', () => this.send({ kind: 'end' }));
+    on('[data-act="end"]', () => (this.view?.phase === 'deploy' ? this.submitDeploy() : this.send({ kind: 'end' })));
+    on('[data-act="market"]', () => this.openMarket());
     on('[data-act="codex"]', () => openCodex('turn'));
     on('[data-act="settings"]', () => openSettings(() => this.renderAll()));
     on('[data-act="sound"]', () => this.toggleSound());
@@ -201,9 +211,25 @@ export class GameScreen {
     }
   }
 
+  /** 배치 중에는 내가 고친 자리를 반영한 화면용 상태 */
+  private displayView(v: PlayerView | null = this.view): PlayerView | null {
+    if (!v || v.phase !== 'deploy' || !this.deployLayout || v.deployed[v.you]) return v;
+    const lay = this.deployLayout;
+    return { ...v, pieces: v.pieces.map((p) => (lay[p.id] ? { ...p, r: lay[p.id].r, c: lay[p.id].c } : p)) };
+  }
+
+  private syncLayout(v: PlayerView) {
+    if (v.phase === 'deploy' && !v.deployed[v.you]) {
+      if (!this.deployLayout) this.deployLayout = Object.fromEntries(v.pieces.filter((p) => p.owner === v.you).map((p) => [p.id, { r: p.r, c: p.c }]));
+    } else {
+      this.deployLayout = null;
+    }
+  }
+
   private async onState(msg: StateMsg) {
     const prev = this.view;
     const roundStart = msg.events.some((e) => e.type === 'round_start');
+    if (roundStart) this.deployLayout = null;
     if (roundStart || !prev || prev.round !== msg.view.round || prev.you !== msg.view.you) {
       this.overlay?.remove();
       this.overlay = null;
@@ -213,7 +239,8 @@ export class GameScreen {
       this.view = msg.view;
       this.match = msg.match;
       this.deadline = msg.deadline;
-      this.board.sync(msg.view);
+      this.syncLayout(msg.view);
+      this.board.sync(this.displayView(msg.view)!);
       this.renderAll();
     }
     this.match = msg.match;
@@ -232,8 +259,10 @@ export class GameScreen {
     if (this.selected && !pieceById(msg.view, this.selected)) this.selected = null;
     if (this.selected && pieceById(msg.view, this.selected)?.owner !== msg.view.you) this.selected = null;
     if (this.mode && !isMyTurn(msg.view)) this.mode = null;
+    this.syncLayout(msg.view);
+    if (msg.view.phase === 'deploy' && this.selected && !pieceById(msg.view, this.selected)) this.selected = null;
     this.board.setIntel(this.intelMarks(msg.view));
-    this.board.sync(msg.view);
+    this.board.sync(this.displayView(msg.view)!);
     this.renderAll();
   }
 
@@ -261,9 +290,31 @@ export class GameScreen {
           this.banner(mine ? '당신의 차례' : `${this.oppName()}의 차례`, `TURN ${Math.ceil(ev.turn / 2)}`, mine);
           if (mine && ev.famine) toast('흉년 — 이번 차례 수입이 없다.', 'err');
           if (mine && ev.curfew) toast('통금령 — 이번 차례 AP가 1 줄었다.', 'err');
-          if (mine && ev.income) toast(`농노들이 ${ev.income} 루렌을 바쳤다.`, 'gold', 1800);
+          if (mine && ev.income) toast(ev.influence ? `수입 ${ev.income} 루렌 — 그중 궁정 영향력 ${ev.influence}` : `농노들이 ${ev.income} 루렌을 바쳤다.`, 'gold', 1800);
           break;
         }
+        case 'deployed':
+          if (ev.faction !== next.you) toast(`${josa(this.oppName(), '이/가')} 배치를 마쳤다.`, 'info', 2200);
+          break;
+        case 'reveal': {
+          audio.play('roundStart');
+          this.banner('궁정의 문이 열린다', 'DEPLOYMENT REVEALED', false);
+          this.board.sync(next);
+          await this.board.animReveal(next.pieces.filter((p) => p.owner !== next.you).map((p) => p.id));
+          break;
+        }
+        case 'bought':
+          audio.play('card');
+          if (ev.faction === next.you && ev.card) toast(`궁정 상점에서 「${CARDS[ev.card].name}」을 샀다.`, 'gold');
+          if (ev.faction !== next.you) toast('상대가 궁정 상점에서 밀서를 샀다.', 'info');
+          break;
+        case 'restock':
+          toast('궁정 상점에 새 카드가 들어왔다.', 'gold', 2400);
+          break;
+        case 'court_event':
+          this.banner(COURT_EVENTS[ev.event].name, 'COURT DECREE', true);
+          await this.sleep(700);
+          break;
         case 'move':
           audio.play('move');
           await this.board.animMove(ev.piece, ev.to, ev.shadow);
@@ -581,7 +632,8 @@ export class GameScreen {
 
   /* ── 입력 ─────────────────────────────────── */
   private send(action: Action) {
-    if (!this.view || !isMyTurn(this.view) || this.pending || this.animating) return;
+    if (!this.view || this.pending || this.animating) return;
+    if (action.kind !== 'deploy' && !isMyTurn(this.view)) return;
     if (!this.net.send({ t: 'action', action })) { toast('서버와 연결이 끊겼다.', 'err'); return; }
     this.pending = true;
     this.closePopover();
@@ -595,6 +647,7 @@ export class GameScreen {
     if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
     if (e.key === 'Escape') { this.cancel(); return; }
     if (e.key === 'e' || e.key === 'E' || e.key === 'ㄷ') {
+      if (this.view?.phase === 'deploy') { this.submitDeploy(); return; }
       if (this.view && isMyTurn(this.view)) { audio.play('click'); this.send({ kind: 'end' }); }
       return;
     }
@@ -617,6 +670,7 @@ export class GameScreen {
     if (!v || this.animating) return;
     this.closePopover();
     this.hideTooltip();
+    if (v.phase === 'deploy') { this.deployClick(r, c); return; }
     const p = pieceAt(v, r, c);
     const my = isMyTurn(v) && !this.pending;
 
@@ -625,7 +679,8 @@ export class GameScreen {
       if (m.kind === 'card') return this.cardTargetClick(m, r, c, p);
       const list = m.kind === 'bribe'
         ? bribeOptions(v, m.piece).filter((o) => o.affordable).map((o) => o.id)
-        : m.kind === 'interrogate' ? interrogateTargets(v, m.piece) : blessTargets(v, m.piece);
+        : m.kind === 'interrogate' ? interrogateTargets(v, m.piece)
+        : m.kind === 'snipe' ? snipeTargets(v, m.piece) : blessTargets(v, m.piece);
       if (p && list.includes(p.id) && my) {
         audio.play('click');
         this.send({ kind: m.kind, piece: m.piece, target: p.id });
@@ -664,13 +719,21 @@ export class GameScreen {
     const inRange = execTargets(v, actor.id).includes(target.id);
     opts.push({
       icon: 'sword', text: '처형', cost: '1 AP', danger: true,
-      why: !my ? '내 차례가 아니다' : execRange(actor) <= 0 ? `${josa(pname(actor.type, actor.militia), '은/는')} 칼을 들지 않는다` : !inRange ? `사거리 ${execRange(actor)} 밖이다` : v.ap < 1 ? 'AP가 모자란다' : null,
+      why: !my ? '내 차례가 아니다' : execRange(actor, v.pieces) <= 0 ? (actor.type === 'serf' ? '농노는 다른 농노 둘과 붙어 있어야 싸운다' : `${josa(pname(actor.type, actor.militia), '은/는')} 칼을 들지 않는다`) : !inRange ? `사거리 ${execRange(actor, v.pieces)} 밖이다` : v.ap < 1 ? 'AP가 모자란다' : null,
       act: () => this.send({ kind: 'execute', piece: actor.id, target: target.id }),
     });
+    if (actor.type === 'archer' && !actor.militia && !inRange) {
+      const ok = snipeTargets(v, actor.id).includes(target.id);
+      opts.push({
+        icon: 'target', text: '저격', cost: `${ABILITY_INFO.snipe.ap} AP`, danger: true,
+        why: !my ? '내 차례가 아니다' : !ok ? `${SNIPE_RANGE}칸 밖이다` : v.ap < ABILITY_INFO.snipe.ap ? 'AP가 모자란다' : null,
+        act: () => this.send({ kind: 'snipe', piece: actor.id, target: target.id }),
+      });
+    }
     const bribe = bribeOptions(v, actor.id).find((o) => o.id === target.id);
     opts.push({
       icon: 'coin', text: '매수', cost: bribe ? `${bribe.cost} 루렌 · 1 AP` : '',
-      why: !my ? '내 차례가 아니다' : target.type === 'lord' ? '군주는 매수되지 않는다' : !bribeOpen(v) ? '4번째 차례부터 할 수 있다' : !bribe ? (v.me.silverActive ? '두 칸 안이어야 한다' : '붙어 있어야 한다') : !bribe.affordable ? `루렌이 ${bribe.cost - v.me.ruren} 모자란다` : v.ap < 1 ? 'AP가 모자란다' : null,
+      why: !my ? '내 차례가 아니다' : target.type === 'lord' ? '군주는 매수되지 않는다' : guarded(target, v.pieces) ? '성기사가 지키고 있다' : !bribeOpen(v) ? '4번째 차례부터 할 수 있다' : !bribe ? (v.me.silverActive ? '두 칸 안이어야 한다' : '붙어 있어야 한다') : !bribe.affordable ? `루렌이 ${bribe.cost - v.me.ruren} 모자란다` : v.ap < 1 ? 'AP가 모자란다' : null,
       act: () => this.send({ kind: 'bribe', piece: actor.id, target: target.id }),
     });
     if (actor.type === 'spy' && !actor.militia) {
@@ -774,8 +837,8 @@ export class GameScreen {
 
   /* 기물 위 설명 */
   private hover(r: number | null, c: number | null, client: { x: number; y: number }) {
-    const v = this.view;
-    if (!v || r === null || c === null || this.popover || this.animating) { this.hideTooltip(); return; }
+    const v = this.displayView();
+    if (!v || r === null || c === null || this.popover || this.animating || TOUCH) { this.hideTooltip(); return; }
     const p = pieceAt(v, r, c);
     if (!p) { this.hideTooltip(); return; }
     audio.play('hover');
@@ -793,13 +856,15 @@ export class GameScreen {
     if (p.poisoned) tag(`${uiSvg('drop')}독 — 곧 죽는다`, 'warn');
     if (p.oath) tag(`${uiSvg('seal')}충성 서약`, 'good');
     if (p.double) tag(`${uiSvg('mask')}대역`, 'good');
+    if (guarded(p, v.pieces) && p.type !== 'paladin') tag(`${uiSvg('sword')}성기사의 호위 — 매수되지 않는다`, 'good');
     const notes = v.me.intel.filter((n) => n.subjects.includes(p.id));
     for (const n of notes) tag(`${uiSvg('eye')}${n.kind === 'interrogate' ? (n.result ? '심문: VIP' : '심문: VIP 아님') : `보고: 셋 중 ${n.result ? '있음' : '없음'}`}`, n.result ? 'gold' : '');
     const tip = this.tooltip ?? el('div', 'tooltip frame');
     tip.innerHTML = `
       <div class="tt-name">${pieceSvg(p.type)}${mine ? '내' : '상대'} ${esc(pname(p.type, p.militia))}<span class="muted" style="font-weight:400;font-size:12px">${FACTION_NAME[p.owner]}</span></div>
-      <div class="tt-line">이동 ${def.move.pattern === 'any' ? '모든 방향' : def.move.pattern === 'line' ? '직선' : '대각선'} ${def.move.range} · 처형 ${execRange(p) || '—'}</div>
-      ${def.ability ? `<div class="tt-line"><b>${ABILITY_INFO[def.ability].name}</b> (${ABILITY_INFO[def.ability].ap} AP)</div>` : ''}
+      <div class="tt-line">이동 ${def.move.pattern === 'any' ? '모든 방향' : def.move.pattern === 'line' ? '직선' : '대각선'} ${def.move.range} · 처형 ${execRange(p, v.pieces) || '—'} · ${ZONE_NAME[zoneOf(p.r)]}</div>
+      ${def.ability ? `<div class="tt-line"><b>${ABILITY_INFO[def.ability].name}</b> (${ABILITY_INFO[def.ability].ap} AP) — ${esc(ABILITY_INFO[def.ability].text)}</div>` : ''}
+      ${def.passive ? `<div class="tt-line"><b>${def.passive.name}</b> — ${esc(def.passive.text)}</div>` : ''}
       <div class="tt-role">${esc(def.role)}</div>
       ${tags.length ? `<div class="tt-tags">${tags.join('')}</div>` : ''}`;
     if (!this.tooltip) { document.body.appendChild(tip); this.tooltip = tip; }
@@ -822,6 +887,99 @@ export class GameScreen {
     this.board.setHighlights(this.highlights());
   }
 
+  /* ── 배치 ─────────────────────────────────── */
+  private deployClick(r: number, c: number) {
+    const v = this.view;
+    if (!v || v.deployed[v.you] || !this.deployLayout || this.pending) return;
+    const lay = this.deployLayout;
+    const at = (rr: number, cc: number) => Object.keys(lay).find((id) => lay[id].r === rr && lay[id].c === cc) ?? null;
+    const here = at(r, c);
+    const homeRow = HOME_ROWS[v.you].includes(r);
+    if (!this.selected) {
+      if (here) { this.selected = here; audio.play('select'); }
+    } else if (here === this.selected) {
+      this.selected = null;
+    } else if (here) {
+      // 두 기물의 자리를 바꾼다
+      [lay[here], lay[this.selected]] = [lay[this.selected], lay[here]];
+      audio.play('move');
+      this.selected = null;
+    } else if (homeRow) {
+      lay[this.selected] = { r, c };
+      audio.play('move');
+      this.selected = null;
+    } else {
+      toast('내 진영 두 줄 안에만 놓을 수 있다.', 'err', 1800);
+    }
+    this.board.sync(this.displayView()!);
+    this.renderAll();
+  }
+
+  private submitDeploy() {
+    const v = this.view;
+    if (!v || v.phase !== 'deploy' || v.deployed[v.you] || !this.deployLayout) return;
+    audio.play('seal');
+    this.selected = null;
+    this.send({ kind: 'deploy', layout: { ...this.deployLayout } });
+  }
+
+  private renderDeployPanel(v: PlayerView) {
+    const sel = $(this.root, '[data-sel]');
+    const dv = this.displayView(v)!;
+    const p = this.selected ? pieceById(dv, this.selected) : null;
+    if (v.deployed[v.you]) {
+      sel.innerHTML = `<div class="hint">배치를 마쳤다. ${esc(this.oppName())}의 배치를 기다린다. 두 사람이 모두 마치면 상대의 진영이 드러난다.</div>`;
+      return;
+    }
+    if (!p) {
+      sel.innerHTML = `<div class="hint">VIP(금테)를 어디에 숨길지 정하라. 성기사 곁은 매수되지 않고, 앞줄의 농노 셋이 붙어 있으면 맞서 싸운다. 다 놓았으면 <b>배치 완료</b>.</div>`;
+      return;
+    }
+    const def = PIECES[p.type];
+    sel.innerHTML = `
+      <div class="portrait ${p.owner}">${pieceSvg(p.type)}</div>
+      <div class="info">
+        <div class="name">${esc(pname(p.type))}${p.id === v.me.orders.vip ? ' <span class="gold" style="font-size:12px">· VIP</span>' : ''}</div>
+        <div class="stats">${def.passive ? `<b>${def.passive.name}</b> ${esc(def.passive.text)}` : esc(def.role)}</div>
+        <div class="stats muted">옮길 칸이나 자리를 바꿀 기물을 누르세요.</div>
+      </div>`;
+  }
+
+  /* ── 궁정 상점 ─────────────────────────────── */
+  private openMarket() {
+    const v = this.view;
+    if (!v || v.phase !== 'play' || this.animating) return;
+    this.closePopover();
+    audio.play('card');
+    const problem = buyProblem(v);
+    const pop = el('div', 'popover frame market-pop');
+    pop.innerHTML = `
+      <div class="ph">궁정 상점 — 한 장에 1 AP · ${MARKET_PRICE} 루렌 · 차례마다 한 장</div>
+      <div class="market-row">${v.me.market.map((c, i) => {
+        const d = CARDS[c];
+        return `<div class="mcard axis-${d.axis}">
+          <div class="mtop"><span>${AXIS_NAME[d.axis]}</span><span>${d.cost} 루렌${d.ap ? ` · ${d.ap} AP` : ''}${d.secret ? ' · 비밀' : ''}</span></div>
+          <div class="mname">${uiSvg(CARD_ICON[c])}${esc(d.name)}</div>
+          <p>${esc(d.text)}</p>
+          <button class="btn small ${problem ? '' : 'primary'}" data-slot="${i}" ${problem ? 'disabled' : ''}>사기</button>
+        </div>`;
+      }).join('') || '<div class="muted" style="padding:10px">상점이 비었다.</div>'}</div>
+      <div class="market-foot">${problem ? `<span class="blood">${esc(problem)}</span>` : '<span class="muted">산 카드는 손패로 들어온다.</span>'}
+        <span class="muted">재입고까지 ${v.me.restockIn}차례 · 덱 ${v.me.deckCount}장 · 손패 ${v.me.hand.length}/${HAND_LIMIT}</span></div>`;
+    document.body.appendChild(pop);
+    const tile = $(this.root, '[data-act="market"]').getBoundingClientRect();
+    const r = pop.getBoundingClientRect();
+    pop.style.left = `${Math.max(8, Math.min(window.innerWidth - r.width - 8, tile.left + tile.width / 2 - r.width / 2))}px`;
+    pop.style.top = `${Math.max(8, tile.top - r.height - 12)}px`;
+    pop.querySelectorAll<HTMLButtonElement>('[data-slot]').forEach((b) => b.addEventListener('click', () => {
+      audio.play('click');
+      this.closePopover();
+      this.send({ kind: 'buy', slot: Number(b.dataset.slot) });
+    }));
+    this.popover = pop;
+    setTimeout(() => document.addEventListener('pointerdown', this.outside, true), 0);
+  }
+
   private renderTop() {
     const v = this.view, m = this.match;
     if (!v || !m) return;
@@ -840,7 +998,10 @@ export class GameScreen {
     const t = $(this.root, '[data-turn]');
     const over = v.winner !== null || v.draw;
     t.className = `turn-label ${v.current === me ? 'mine' : 'theirs'}`;
-    t.textContent = over ? '판이 끝났다' : v.current === me ? '당신의 차례' : `${m.names[op]}의 차례`;
+    t.textContent = over ? '판이 끝났다'
+      : v.phase === 'deploy' ? (v.deployed[me] ? '상대의 배치를 기다리는 중' : '기물 배치')
+      : v.current === me ? '당신의 차례' : `${m.names[op]}의 차례`;
+    if (v.phase === 'deploy') t.className = `turn-label ${v.deployed[me] ? 'theirs' : 'mine'}`;
     this.tickClock();
   }
 
@@ -868,15 +1029,15 @@ export class GameScreen {
   private renderLeft() {
     const v = this.view!;
     $(this.root, '[data-house]').textContent = FACTION_NAME[v.you];
-    const vip = pieceById(v, v.me.orders.vip) ?? v.graveyard.find((g) => g.id === v.me.orders.vip);
-    const tgt = pieceById(v, v.me.orders.target) ?? v.graveyard.find((g) => g.id === v.me.orders.target);
+    const vip = pieceById(v, v.me.orders.vip) ?? v.graveyard.find((g) => g.id === v.me.orders.vip) ?? { type: v.me.vipType };
+    const tgt = pieceById(v, v.me.orders.target) ?? v.graveyard.find((g) => g.id === v.me.orders.target) ?? { type: v.me.targetType };
     const vipAlive = !!pieceById(v, v.me.orders.vip);
-    const tgtLost = !!tgt && !pieceById(v, v.me.orders.target);
+    const tgtLost = v.phase === 'play' && !pieceById(v, v.me.orders.target);
     $(this.root, '[data-orders]').innerHTML = `
       <div class="order vip ${v.me.exposed ? 'exposed' : ''}">
         <div class="k">${uiSvg('crown')}지켜라 · VIP</div>
         <div class="v">${vip ? pieceSvg(vip.type) : ''}${vip ? pname(vip.type) : '?'}</div>
-        <div class="state">${!vipAlive ? '쓰러졌다' : v.me.exposed ? '노출됨 — 상대가 안다' : '아직 숨겨져 있다'}</div>
+        <div class="state">${!vipAlive && v.phase === 'play' ? '쓰러졌다' : v.me.exposed ? '노출됨 — 상대가 안다' : '아직 숨겨져 있다'}</div>
       </div>
       <div class="order tgt ${v.me.targetDone ? 'done' : ''}">
         <div class="k">${uiSvg('target')}처형하라 · 타겟</div>
@@ -888,8 +1049,11 @@ export class GameScreen {
       <div class="cond ${v.me.targetDone ? 'done' : ''}"><span class="mark"></span><span class="what">내 타겟 처형</span><span class="st">${v.me.targetDone ? '달성' : '남음'}</span></div>
       <div class="cond ${vs === 'done' ? 'done' : vs === 'unknown' ? 'unknown' : ''}"><span class="mark"></span><span class="what">상대 VIP 처형</span><span class="st">${vs === 'done' ? '달성' : vs === 'unknown' ? '알 수 없음' : '남음'}</span></div>`;
     $(this.root, '[data-ruren]').textContent = String(v.me.ruren);
-    const serfs = v.pieces.filter((p) => p.owner === v.you && p.type === 'serf' && !p.militia).length;
-    $(this.root, '[data-income]').textContent = `루렌 · 다음 수입 +${v.me.famine ? 0 : serfs * INCOME_PER_SERF} (농노 ${serfs})`;
+    const dv = this.displayView() ?? v;
+    const serfs = dv.pieces.filter((p) => p.owner === v.you && p.type === 'serf' && !p.militia && zoneOf(p.r) === 'outer').length;
+    const infl = dv.pieces.filter((p) => p.owner === v.you && PIECES[p.type].court && zoneOf(p.r) === 'court').length * COURT_INFLUENCE;
+    const next = v.me.famine ? 0 : serfs * INCOME_PER_SERF + infl;
+    $(this.root, '[data-income]').innerHTML = `루렌 · 다음 수입 <b class="gold">+${next}</b><br>외곽 농노 ${serfs} × ${INCOME_PER_SERF} · 궁정 영향력 ${infl}`;
     const flags: string[] = [];
     const f = (icon: UiIcon, t: string, cls: string) => flags.push(`<span class="flag ${cls}">${uiSvg(icon)}${t}</span>`);
     if (v.me.censor) f('scroll', '검열 대기', 'good');
@@ -908,11 +1072,12 @@ export class GameScreen {
     $(this.root, '[data-op-house]').textContent = FACTION_NAME[op];
     const opSerfs = v.pieces.filter((p) => p.owner === op && p.type === 'serf' && !p.militia).length;
     const opCourt = v.pieces.filter((p) => p.owner === op && PIECES[p.type].court).length;
+    const hidden = v.phase === 'deploy';
     $(this.root, '[data-foe]').innerHTML = `
       <div class="stat"><b>${v.opponent.ruren}</b><span>루렌</span></div>
       <div class="stat"><b>${v.opponent.handCount}</b><span>손패</span></div>
-      <div class="stat"><b>${opCourt}</b><span>궁정</span></div>
-      <div class="stat"><b>${opSerfs}</b><span>농노</span></div>`;
+      <div class="stat"><b>${hidden ? '?' : opCourt}</b><span>궁정</span></div>
+      <div class="stat"><b>${hidden ? '?' : opSerfs}</b><span>농노</span></div>`;
     this.renderFeed();
   }
 
@@ -948,7 +1113,15 @@ export class GameScreen {
     const my = isMyTurn(v);
     $(this.root, '[data-gems]').innerHTML = [0, 1, 2].map((i) => `<div class="gem ${my && i < v.ap ? 'on' : my ? 'spent' : ''}"></div>`).join('');
     const endBtn = $(this.root, '[data-act="end"]') as HTMLButtonElement;
-    endBtn.disabled = !my || this.pending;
+    const deploying = v.phase === 'deploy';
+    endBtn.innerHTML = deploying ? '배치 완료<span class="sub">E</span>' : '차례 종료<span class="sub">E</span>';
+    endBtn.disabled = deploying ? v.deployed[v.you] || this.pending : !my || this.pending;
+    // 궁정 상점 칸
+    const mt = $(this.root, '[data-act="market"]') as HTMLButtonElement;
+    mt.disabled = deploying;
+    $(this.root, '[data-market-sub]').textContent = deploying ? '배치 뒤에 열린다' : `${v.me.market.length}장 · 재입고 ${v.me.restockIn}차례 뒤`;
+    mt.classList.toggle('ready', !deploying && !buyProblem(v));
+    if (deploying) { this.renderDeployPanel(v); this.renderHand(v); return; }
 
     // 선택한 기물
     const sel = $(this.root, '[data-sel]');
@@ -972,6 +1145,10 @@ export class GameScreen {
         const can = my && v.ap >= ab.ap && blessTargets(v, p.id).length > 0 && !this.pending;
         acts.push(`<button class="btn small" data-ab="bless" ${can ? '' : 'disabled'} title="${esc(ab.text)}">${uiSvg('halo')}${ab.name} · ${ab.ap}AP</button>`);
       }
+      if (ab && def.ability === 'snipe') {
+        const can = my && v.ap >= ab.ap && snipeTargets(v, p.id).length > 0 && !this.pending;
+        acts.push(`<button class="btn small" data-ab="snipe" ${can ? '' : 'disabled'} title="${esc(ab.text)}">${uiSvg('target')}${ab.name} · ${ab.ap}AP</button>`);
+      }
       const bribes = bribeOptions(v, p.id);
       if (bribeOpen(v)) {
         const can = my && v.ap >= 1 && bribes.some((b) => b.affordable) && !this.pending;
@@ -983,7 +1160,8 @@ export class GameScreen {
         <div class="portrait ${p.owner}">${pieceSvg(p.type)}</div>
         <div class="info">
           <div class="name">${esc(pname(p.type, p.militia))}${p.id === v.me.orders.vip ? ' <span class="gold" style="font-size:12px">· VIP</span>' : ''}${p.owner !== p.origin ? ' <span class="muted" style="font-size:12px">· 꼭두각시</span>' : ''}</div>
-          <div class="stats">이동 ${def.move.pattern === 'any' ? '모든 방향' : def.move.pattern === 'line' ? '직선' : '대각선'} ${def.move.range} · 처형 ${execRange(p) || '—'}${p.rooted ? ' · <span class="blood">구속됨</span>' : ''}</div>
+          <div class="stats">이동 ${def.move.pattern === 'any' ? '모든 방향' : def.move.pattern === 'line' ? '직선' : '대각선'} ${def.move.range} · 처형 ${execRange(p, v.pieces) || '—'}${p.rooted ? ' · <span class="blood">구속됨</span>' : ''}</div>
+          ${def.passive ? `<div class="stats passive"><b>${def.passive.name}</b> ${esc(def.passive.text)}</div>` : ''}
           <div class="stats muted">${my ? `갈 수 있는 칸 ${moves} · 칠 수 있는 적 ${execs}` : '상대의 차례'}</div>
         </div>
         <div class="actions">${acts.join('')}</div>`;
@@ -991,12 +1169,15 @@ export class GameScreen {
         audio.play('click');
         const kind = b.dataset.ab!;
         if (kind === 'royal') { this.send({ kind: 'royal', piece: p.id }); return; }
-        this.mode = { kind: kind as 'bribe' | 'interrogate' | 'bless', piece: p.id };
+        this.mode = { kind: kind as 'bribe' | 'interrogate' | 'bless' | 'snipe', piece: p.id };
         this.renderAll();
       }));
     }
 
-    // 손패
+    this.renderHand(v);
+  }
+
+  private renderHand(v: PlayerView) {
     const hand = $(this.root, '[data-hand]');
     if (!v.me.hand.length) {
       hand.innerHTML = '<div class="hand-empty">손패를 모두 썼다.</div>';
@@ -1005,7 +1186,7 @@ export class GameScreen {
         const d = CARDS[c];
         const problem = cardProblem(v, c);
         const focus = this.mode?.kind === 'card' && this.mode.card === c;
-        return `<div class="card ${problem ? 'disabled' : ''} ${c === 'switch' ? 'signature' : ''} ${focus ? 'focus' : ''}" data-card="${c}" data-i="${i}" title="${esc(problem ?? d.text)}" tabindex="0" role="button" aria-label="${esc(d.name)}">
+        return `<div class="card axis-${d.axis} ${problem ? 'disabled' : ''} ${c === 'switch' ? 'signature' : ''} ${focus ? 'focus' : ''}" data-card="${c}" data-i="${i}" title="${esc(problem ?? d.text)}" tabindex="0" role="button" aria-label="${esc(d.name)}">
           <div class="cost">${d.cost}</div>${d.ap ? `<div class="apcost"><span>${d.ap}</span></div>` : ''}
           <div class="axis">${AXIS_NAME[d.axis]}</div>
           <div class="cico">${uiSvg(CARD_ICON[c])}</div>
@@ -1027,6 +1208,20 @@ export class GameScreen {
     const wrap = this.boardWrap();
     wrap.querySelector('.targeting')?.remove();
     const m = this.mode;
+    if (this.view?.phase === 'deploy' && !this.view.deployed[this.view.you]) {
+      const bar = el('div', 'targeting frame', `<div class="msg">기물 배치<small>기물을 누르고, 빛나는 내 진영 칸이나 다른 기물을 누르면 옮기거나 바꾼다.</small></div>
+        <button class="btn ghost small" data-reset>처음 자리로</button>`);
+      wrap.appendChild(bar);
+      bar.querySelector('[data-reset]')!.addEventListener('click', () => {
+        audio.play('click');
+        const v = this.view!;
+        this.deployLayout = Object.fromEntries(v.pieces.filter((p) => p.owner === v.you).map((p) => [p.id, { r: p.r, c: p.c }]));
+        this.selected = null;
+        this.board.sync(this.displayView()!);
+        this.renderAll();
+      });
+      return;
+    }
     if (!m || !this.view) return;
     let msg = '';
     let sub = '';
@@ -1034,6 +1229,7 @@ export class GameScreen {
     if (m.kind === 'bribe') { msg = '매수할 적을 고르세요'; sub = '초록 테두리 위의 숫자가 비용이다. 회색은 루렌이 모자란다.'; }
     if (m.kind === 'interrogate') { msg = '심문할 적을 고르세요'; sub = '붙어 있는 적 궁정 기물이 VIP인지 캐낸다.'; }
     if (m.kind === 'bless') { msg = '축복할 아군을 고르세요'; sub = '상대의 다음 차례 동안 처형을 한 번 막는다.'; }
+    if (m.kind === 'snipe') { msg = '저격할 적을 고르세요'; sub = `${SNIPE_RANGE}칸 안의 적. 2 AP를 쓴다.`; }
     if (m.kind === 'card') {
       const d = CARDS[m.card];
       const t = d.targeting;
@@ -1059,7 +1255,11 @@ export class GameScreen {
     const v = this.view;
     if (!v) return NO_HIGHLIGHTS;
     const my = isMyTurn(v) && !this.pending;
-    const h: Highlights = { ...NO_HIGHLIGHTS, moves: [], execs: [], bribes: [], rings: [], choices: [], picks: [], cells: [] };
+    const h: Highlights = { ...NO_HIGHLIGHTS, moves: [], execs: [], bribes: [], rings: [], choices: [], picks: [], cells: [], home: [] };
+    if (v.phase === 'deploy') {
+      if (!v.deployed[v.you]) { h.home = homeCells(v); h.selected = this.selected; }
+      return h;
+    }
     const m = this.mode;
     if (m && my) {
       if (m.kind === 'card') {
@@ -1077,6 +1277,7 @@ export class GameScreen {
       if (m.kind === 'bribe') h.bribes = bribeOptions(v, m.piece);
       if (m.kind === 'interrogate') h.rings = interrogateTargets(v, m.piece).map((id) => ({ id, tone: 'ivory' as const }));
       if (m.kind === 'bless') h.rings = blessTargets(v, m.piece).map((id) => ({ id, tone: 'gold' as const }));
+      if (m.kind === 'snipe') h.execs = snipeTargets(v, m.piece);
       return h;
     }
     if (!this.selected) return h;

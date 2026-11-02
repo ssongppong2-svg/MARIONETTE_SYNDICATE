@@ -20,8 +20,10 @@ export interface Highlights {
   choices: string[];
   picks: string[];
   cells: Cell[];
+  /** 배치 단계: 기물을 놓을 수 있는 내 진영 칸 */
+  home: Cell[];
 }
-export const NO_HIGHLIGHTS: Highlights = { selected: null, moves: [], execs: [], bribes: [], rings: [], choices: [], picks: [], cells: [] };
+export const NO_HIGHLIGHTS: Highlights = { selected: null, moves: [], execs: [], bribes: [], rings: [], choices: [], picks: [], cells: [], home: [] };
 
 export interface IntelMark { id: string; vip: boolean }
 
@@ -333,6 +335,11 @@ export class Board {
     for (const m of h.moves) {
       const at = this.center(m.r, m.c);
       g.poly([at.x, at.y - 9, at.x + 9, at.y, at.x, at.y + 9, at.x - 9, at.y]).fill({ color: hex(PAL.ivory), alpha: 0.62 });
+    }
+    for (const m of h.home) {
+      const at = this.center(m.r, m.c);
+      g.rect(at.x - C / 2 + 2, at.y - C / 2 + 2, C - 4, C - 4).fill({ color: hex(PAL.gold), alpha: 0.08 });
+      g.rect(at.x - C / 2 + 6, at.y - C / 2 + 6, C - 12, C - 12).stroke({ width: 1.2, color: hex(PAL.goldHi), alpha: 0.35 });
     }
     for (const m of h.cells) {
       const at = this.center(m.r, m.c);
@@ -648,6 +655,14 @@ export class Board {
     if (!s) return;
     this.burst('soft', s.root.x, s.root.y, 22, { color: 0x6f8f3a, speed: [0.3, 1.4], size: [20, 46], life: [700, 1200], gravity: -0.02 });
     await this.wait(380);
+  }
+
+  /** 배치 공개: 상대 기물이 그림자에서 나타난다 */
+  async animReveal(ids: string[]) {
+    const list = ids.map((id) => this.spriteAt(id)).filter(Boolean) as PieceSprite[];
+    for (const s of list) { s.root.alpha = 0; s.root.scale.set(0.7); }
+    for (const s of list) this.burst('soft', s.root.x, s.root.y, 4, { color: 0x2a1b2e, speed: [0.2, 1], size: [30, 50], life: [500, 800] });
+    await this.tween(650, (k) => { for (const s of list) { s.root.alpha = k; s.root.scale.set(0.7 + 0.3 * k); } }, easeOut);
   }
 
   async animFlash(id: string, text: string, color = PAL.ivory) {
