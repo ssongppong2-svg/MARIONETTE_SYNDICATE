@@ -1,0 +1,1 @@
+VITE_OFFLINE=1
