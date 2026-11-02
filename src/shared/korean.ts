@@ -21,3 +21,8 @@ export function josa(word: string, pair: JosaPair): string {
   if (pair === '으로/로') return word + (b && !rieul(word) ? withB : withoutB);
   return word + (b ? withB : withoutB);
 }
+
+/** 조사만 돌려줍니다. particle('궁수', '이/가') → '가' */
+export function particle(word: string, pair: JosaPair): string {
+  return josa(word, pair).slice(word.length);
+}
