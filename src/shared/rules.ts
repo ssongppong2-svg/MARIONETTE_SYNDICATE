@@ -4,7 +4,8 @@
  * 숨은 정보(VIP, 충성 서약)에 걸리는 실패는 여기서 막지 않고 실행할 때 드러납니다.
  */
 import {
-  ABILITY_INFO, BRIBE_AFTER_TURNS, BRIBE_COST, BRIBE_MIN, CARDS, N, PIECES, SHADOW_RANGE, SPY_DISCOUNT,
+  ABILITY_INFO, BRIBE_AFTER_TURNS, BRIBE_COST, BRIBE_MIN, CARDS, HAND_LIMIT, HOME_ROWS, MARKET_PRICE, N, PIECES,
+  SHADOW_RANGE, SNIPE_RANGE, SPY_DISCOUNT,
 } from './data';
 import { josa } from './korean';
 import type { Action, CardId, Cell } from './types';
@@ -25,7 +26,8 @@ export function pieceAt(v: PlayerView, r: number, c: number): ViewPiece | undefi
 export function pieceById(v: PlayerView, id: string): ViewPiece | undefined {
   return v.pieces.find((p) => p.id === id);
 }
-export const isMyTurn = (v: PlayerView): boolean => v.current === v.you && v.winner === null && !v.draw;
+export const isMyTurn = (v: PlayerView): boolean =>
+  v.phase === 'play' && v.current === v.you && v.winner === null && !v.draw;
 const mine = (v: PlayerView, id: string): ViewPiece | undefined => {
   const p = pieceById(v, id);
   return p && p.owner === v.you ? p : undefined;
@@ -34,11 +36,25 @@ const enemies = (v: PlayerView): ViewPiece[] => v.pieces.filter((p) => p.owner !
 const allies = (v: PlayerView): ViewPiece[] => v.pieces.filter((p) => p.owner === v.you);
 export const isCourt = (p: ViewPiece): boolean => PIECES[p.type].court;
 
-export function execRange(p: ViewPiece): number {
+/** 농노 결집: 다른 아군 농노 둘 이상과 붙어 있는가 */
+export function rallied(p: ViewPiece, all: readonly ViewPiece[]): boolean {
+  if (p.type !== 'serf' || p.militia) return false;
+  return all.filter((q) => q.id !== p.id && q.owner === p.owner && q.type === 'serf' && cheb(p, q) === 1).length >= 2;
+}
+
+/** 처형 사거리. 농노 결집을 따지려면 판 위 기물들(all)을 넘긴다. */
+export function execRange(p: ViewPiece, all?: readonly ViewPiece[]): number {
   if (p.militia) return 1;
   let e = PIECES[p.type].exec;
   if (p.type === 'paladin' && p.buffed && e > 0) e += 1;
+  if (all && rallied(p, all)) e = 1;
   return e;
+}
+
+/** 성기사 호위: 성기사와, 같은 편 성기사에 붙어 있는 기물은 매수되지 않는다 */
+export function guarded(q: ViewPiece, all: readonly ViewPiece[]): boolean {
+  if (q.type === 'paladin' && !q.militia) return true;
+  return all.some((g) => g.type === 'paladin' && !g.militia && g.owner === q.owner && g.id !== q.id && cheb(g, q) === 1);
 }
 
 export function reachable(v: PlayerView, id: string): Cell[] {
@@ -59,9 +75,16 @@ export function reachable(v: PlayerView, id: string): Cell[] {
 export function execTargets(v: PlayerView, id: string): string[] {
   const p = pieceById(v, id);
   if (!p) return [];
-  const range = execRange(p);
+  const range = execRange(p, v.pieces);
   if (range <= 0) return [];
   return v.pieces.filter((q) => q.owner !== p.owner && cheb(p, q) <= range).map((q) => q.id);
+}
+
+/** 궁수 저격 (2 AP): 네 칸 안의 적 */
+export function snipeTargets(v: PlayerView, id: string): string[] {
+  const p = pieceById(v, id);
+  if (!p || p.type !== 'archer' || p.militia) return [];
+  return v.pieces.filter((q) => q.owner !== p.owner && cheb(p, q) <= SNIPE_RANGE).map((q) => q.id);
 }
 
 export const bribeOpen = (v: PlayerView): boolean => v.turnsTaken[v.you] >= BRIBE_AFTER_TURNS;
@@ -86,6 +109,7 @@ export function bribeOptions(v: PlayerView, id: string): BribeOption[] {
   const out: BribeOption[] = [];
   for (const q of v.pieces) {
     if (q.owner === p.owner || cheb(p, q) > reach) continue;
+    if (guarded(q, v.pieces)) continue;
     const cost = bribeCost(v, p, q);
     if (cost === null) continue;
     out.push({ id: q.id, cost, affordable: cost <= v.me.ruren });
@@ -126,6 +150,44 @@ export function shadowCells(v: PlayerView, id: string): Cell[] {
     }
   }
   return out;
+}
+
+/* ── 배치 ─────────────────────────────────────── */
+/** 내가 기물을 놓을 수 있는 칸 (내 진영 두 줄) */
+export function homeCells(v: PlayerView): Cell[] {
+  const out: Cell[] = [];
+  for (const r of HOME_ROWS[v.you]) for (let c = 0; c < N; c++) out.push({ r, c });
+  return out;
+}
+
+export function deployProblem(v: PlayerView, layout: Record<string, Cell>): string | null {
+  if (v.phase !== 'deploy') return '배치 단계가 아니다.';
+  if (v.deployed[v.you]) return '이미 배치를 마쳤다.';
+  const mineIds = v.pieces.filter((p) => p.owner === v.you).map((p) => p.id);
+  const ids = Object.keys(layout);
+  if (ids.length !== mineIds.length || !mineIds.every((id) => layout[id])) return '내 기물을 모두 놓아야 한다.';
+  const rows = HOME_ROWS[v.you];
+  const used = new Set<string>();
+  for (const id of ids) {
+    const c = layout[id];
+    if (!c || !Number.isInteger(c.r) || !Number.isInteger(c.c)) return '칸이 잘못되었다.';
+    if (!rows.includes(c.r) || c.c < 0 || c.c >= N) return '내 진영 두 줄 안에만 놓을 수 있다.';
+    const key = `${c.r},${c.c}`;
+    if (used.has(key)) return '한 칸에 기물 둘을 놓을 수 없다.';
+    used.add(key);
+  }
+  return null;
+}
+
+/* ── 궁정 상점 ─────────────────────────────────── */
+export function buyProblem(v: PlayerView): string | null {
+  if (!isMyTurn(v)) return '내 차례가 아니다.';
+  if (v.me.boughtThisTurn) return '상점에서는 차례마다 한 장만 살 수 있다.';
+  if (v.ap < 1) return 'AP가 모자란다.';
+  if (v.me.ruren < MARKET_PRICE) return `루렌이 ${MARKET_PRICE - v.me.ruren} 모자란다.`;
+  if (v.me.hand.length >= HAND_LIMIT) return `손패는 ${HAND_LIMIT}장까지다.`;
+  if (!v.me.market.length) return '상점이 비었다.';
+  return null;
 }
 
 /** 카드가 고를 수 있는 기물 후보 */
@@ -194,8 +256,15 @@ export function cardProblem(v: PlayerView, card: CardId): string | null {
 /** 행동이 규칙에 맞는지 검사. 맞으면 null, 아니면 이유. */
 export function validate(v: PlayerView, a: Action): string | null {
   if (v.winner !== null || v.draw) return '이 판은 끝났다.';
+  if (a.kind === 'deploy') return deployProblem(v, a.layout ?? {});
+  if (v.phase !== 'play') return '아직 배치 중이다.';
   if (v.current !== v.you) return '내 차례가 아니다.';
   if (a.kind === 'end') return null;
+  if (a.kind === 'buy') {
+    const problem = buyProblem(v);
+    if (problem) return problem;
+    return Number.isInteger(a.slot) && a.slot >= 0 && a.slot < v.me.market.length ? null : '그 자리에는 카드가 없다.';
+  }
 
   if (a.kind === 'card') {
     const problem = cardProblem(v, a.card);
@@ -226,13 +295,20 @@ export function validate(v: PlayerView, a: Action): string | null {
       return reachable(v, p.id).some((c) => c.r === a.to.r && c.c === a.to.c) ? null : '그 칸으로는 갈 수 없다.';
     case 'execute':
       if (v.ap < 1) return 'AP가 모자란다.';
-      if (execRange(p) <= 0) return `${josa(PIECES[p.type].name, '은/는')} 처형하지 않는다.`;
+      if (execRange(p, v.pieces) <= 0) {
+        return p.type === 'serf' ? '농노는 다른 농노 둘과 붙어 있어야 맞서 싸운다.' : `${josa(PIECES[p.type].name, '은/는')} 처형하지 않는다.`;
+      }
       return execTargets(v, p.id).includes(a.target) ? null : '사거리 밖이다.';
+    case 'snipe':
+      if (p.type !== 'archer' || p.militia) return '궁수만 저격할 수 있다.';
+      if (v.ap < ABILITY_INFO.snipe.ap) return 'AP가 모자란다.';
+      return snipeTargets(v, p.id).includes(a.target) ? null : `${SNIPE_RANGE}칸 밖이다.`;
     case 'bribe': {
       if (v.ap < 1) return 'AP가 모자란다.';
       if (!bribeOpen(v)) return '매수는 4번째 차례부터 할 수 있다.';
       const target = pieceById(v, a.target);
       if (target?.type === 'lord') return '군주는 매수되지 않는다.';
+      if (target && guarded(target, v.pieces)) return '성기사가 지키고 있어 매수되지 않는다.';
       const opt = bribeOptions(v, p.id).find((o) => o.id === a.target);
       if (!opt) return v.me.silverActive ? '두 칸 안의 적만 매수할 수 있다.' : '붙어 있는 적만 매수할 수 있다.';
       return opt.affordable ? null : `루렌이 ${opt.cost - v.me.ruren} 모자란다.`;

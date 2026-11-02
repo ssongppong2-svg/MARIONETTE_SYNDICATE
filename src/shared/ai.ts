@@ -6,10 +6,13 @@
  *  보통   : 한 수씩 위험과 이득을 따져 가장 나은 수를 고른다
  *  어려움 : 남은 AP로 둘 수 있는 수열(최대 3수)을 내다보고 고른다
  */
-import { ABILITY_INFO, CARDS, INCOME_PER_SERF, PIECES, TAX_PER_SERF } from './data';
 import {
-  blessTargets, bribeOptions, cardChoices, cardProblem, cheb, execRange, execTargets, inBoard, interrogateTargets,
-  isCourt, isMyTurn, reachable, royalEffect, shadowCells, validate,
+  ABILITY_INFO, CARDS, COURT_INFLUENCE, HOME_ROWS, INCOME_PER_SERF, MARKET_PRICE, N, PIECES, SNIPE_RANGE, TAX_PER_SERF,
+  zoneOf,
+} from './data';
+import {
+  blessTargets, bribeOptions, buyProblem, cardChoices, cardProblem, cheb, execRange, execTargets, inBoard,
+  interrogateTargets, isCourt, isMyTurn, reachable, royalEffect, shadowCells, snipeTargets, validate,
 } from './rules';
 import type { Action, CardId, Cell, Faction, PieceType } from './types';
 import { other } from './types';
@@ -107,18 +110,22 @@ function strikeMap(s: Sim, side: Faction, apBudget: number): Map<string, number>
   const victims = s.pieces.filter((p) => p.owner !== side);
   for (const p of s.pieces) {
     if (p.owner !== side) continue;
-    const range = execRange(p);
-    if (range <= 0) continue;
+    const base = execRange(p, s.pieces);
+    const sniper = p.type === 'archer' && !p.militia;
+    if (base <= 0 && !sniper) continue;
     // 0, 1, 2번 움직인 자리 (구속된 기물은 그 자리 그대로)
     let frontier: Cell[] = [{ r: p.r, c: p.c }];
     const seen = new Set([`${p.r},${p.c}`]);
     const occNoSelf = new Set(occ);
     occNoSelf.delete(`${p.r},${p.c}`);
     for (let moves = 0; moves < apBudget; moves++) {
+      // 남은 AP가 2 이상이면 궁수는 저격(4칸)도 할 수 있다
+      const range = sniper && apBudget - moves >= ABILITY_INFO.snipe.ap ? SNIPE_RANGE : base;
+      const cost = sniper && range === SNIPE_RANGE && base < SNIPE_RANGE ? ABILITY_INFO.snipe.ap : 1;
       for (const at of frontier) {
         for (const q of victims) {
           if (cheb(at, q) <= range) {
-            const need = moves + 1;
+            const need = moves + cost;
             if ((out.get(q.id) ?? 99) > need) out.set(q.id, need);
           }
         }
@@ -167,7 +174,7 @@ function evaluate(ctx: Ctx, s: Sim): number {
     if (need !== undefined) score += need === 1 ? 70 : need === 2 ? 45 : 25;
     else {
       const t = theirs.find((p) => p.id === tgt)!;
-      const d = Math.min(...mine.filter((p) => execRange(p) > 0).map((p) => cheb(p, t)), 20);
+      const d = Math.min(...mine.filter((p) => execRange(p, s.pieces) > 0).map((p) => cheb(p, t)), 20);
       score -= d * 4;
     }
   }
@@ -178,7 +185,7 @@ function evaluate(ctx: Ctx, s: Sim): number {
       const need = myStrikes.get(p.id);
       if (need !== undefined) score += b * (need === 1 ? 140 : need === 2 ? 90 : 50);
       else {
-        const d = Math.min(...mine.filter((m) => execRange(m) > 0).map((m) => cheb(m, p)), 20);
+        const d = Math.min(...mine.filter((m) => execRange(m, s.pieces) > 0).map((m) => cheb(m, p)), 20);
         score -= b * d * 5;
       }
     }
@@ -201,9 +208,10 @@ function evaluate(ctx: Ctx, s: Sim): number {
   }
   score -= worst * 0.85 + (sum - worst) * 0.25;
 
-  // 경제
-  const serfs = mine.filter((p) => p.type === 'serf' && !p.militia).length;
-  score += s.ruren * 1.6 + serfs * INCOME_PER_SERF * 3;
+  // 경제: 외곽의 농노는 수입, 궁정 구역의 궁정 기물은 영향력
+  const serfs = mine.filter((p) => p.type === 'serf' && !p.militia && zoneOf(p.r) === 'outer').length;
+  const influence = mine.filter((p) => isCourt(p) && zoneOf(p.r) === 'court').length;
+  score += s.ruren * 1.6 + serfs * INCOME_PER_SERF * 3 + influence * COURT_INFLUENCE * 5;
   score += s.bonus;
   return score;
 }
@@ -224,10 +232,13 @@ function applyLight(ctx: Ctx, s: Sim, a: Action): Sim | null {
       n.ap -= 1;
       return n;
     }
-    case 'execute': {
+    case 'execute':
+    case 'snipe': {
       const t = find(a.target);
-      n.ap -= 1;
-      if (t.blessed) { t.blessed = false; n.bonus -= 5; return n; }
+      const actor = find(a.piece);
+      n.ap -= a.kind === 'snipe' ? ABILITY_INFO.snipe.ap : 1;
+      const ambush = actor.type === 'assassin' && !actor.militia;
+      if (t.blessed && !ambush) { t.blessed = false; n.bonus -= 5; return n; }
       n.pieces = n.pieces.filter((p) => p.id !== t.id);
       if (t.id === v.me.orders.target) n.targetDone = 1;
       n.vipDone = Math.min(1, n.vipDone + (belief.get(t.id) ?? 0));
@@ -273,9 +284,30 @@ function applyLight(ctx: Ctx, s: Sim, a: Action): Sim | null {
     }
     case 'card':
       return applyCardLight(ctx, n, a);
+    case 'buy': {
+      const card = n.hand.length < 99 ? v.me.market[a.slot] : undefined;
+      if (!card) return null;
+      n.ap -= 1;
+      n.ruren -= MARKET_PRICE;
+      n.hand.push(card);
+      n.bonus += cardWorth(ctx, card);
+      return n;
+    }
+    case 'deploy':
     case 'end':
       return n;
   }
+}
+
+/** 상점 카드의 대략적인 값어치 (사서 손에 쥐는 가치) */
+function cardWorth(ctx: Ctx, card: CardId): number {
+  const { v } = ctx;
+  const late = v.turnsTaken[v.you] >= 10;
+  const table: Record<CardId, number> = {
+    switch: 40, report: 26, forgery: 14, censor: 16, decree: 12, tax: 18, famine: 14, conscript: 8,
+    oath: v.me.exposed ? 10 : 26, silver: 10, poison: 30, shadow: 24, double: 22, curfew: 18,
+  };
+  return (table[card] ?? 10) * (late ? 0.8 : 1) - 9;
 }
 
 function applyCardLight(ctx: Ctx, n: Sim, a: Extract<Action, { kind: 'card' }>): Sim | null {
@@ -309,7 +341,7 @@ function applyCardLight(ctx: Ctx, n: Sim, a: Extract<Action, { kind: 'card' }>):
     case 'censor': n.bonus += early ? 34 : 18; return n;
     case 'decree': {
       const t = find(v.me.orders.target);
-      const d = t ? Math.min(...mine.filter((m) => execRange(m) > 0).map((m) => cheb(m, t)), 20) : 0;
+      const d = t ? Math.min(...mine.filter((m) => execRange(m, n.pieces) > 0).map((m) => cheb(m, t)), 20) : 0;
       n.bonus += d >= 6 ? 30 : -10;
       return n;
     }
@@ -405,7 +437,7 @@ function candidates(ctx: Ctx, s: Sim, moveCap: number): Action[] {
     const moves: { a: Action; h: number }[] = [];
     const theirs = s.pieces.filter((p) => p.owner !== me);
     for (const p of mine) {
-      if (execRange(p) <= 0 && p.type !== 'priest' && p.type !== 'spy' && p.type !== 'serf') continue;
+      if (execRange(p, s.pieces) <= 0 && p.type !== 'priest' && p.type !== 'spy' && p.type !== 'serf' && p.type !== 'archer') continue;
       for (const to of reachable(sv, p.id)) {
         const before = Math.min(...theirs.map((q) => cheb(p, q)), 20);
         const after = Math.min(...theirs.map((q) => cheb(to, q)), 20);
@@ -422,6 +454,20 @@ function candidates(ctx: Ctx, s: Sim, moveCap: number): Action[] {
       if (!danger.has(p.id)) continue;
       for (const to of reachable(sv, p.id).slice(0, 8)) out.push({ kind: 'move', piece: p.id, to });
     }
+  }
+  if (s.ap >= ABILITY_INFO.snipe.ap) {
+    for (const p of mine) {
+      if (p.type !== 'archer') continue;
+      const near = new Set(execTargets(sv, p.id));
+      for (const t of snipeTargets(sv, p.id)) if (!near.has(t)) out.push({ kind: 'snipe', piece: p.id, target: t });
+    }
+  }
+  if (!buyProblem({ ...sv, me: { ...sv.me, boughtThisTurn: sv.me.boughtThisTurn } })) {
+    let bestSlot = -1, bestW = 0;
+    v.me.market.forEach((c, i) => { const w = cardWorth(ctx, c); if (w > bestW) { bestW = w; bestSlot = i; } });
+    // 손패가 넉넉하면 사지 않는다 (AP와 루렌을 판 위에 쓴다)
+    const thin = s.hand.length <= 3 || s.ruren >= 14;
+    if (bestSlot >= 0 && thin && s.ruren >= MARKET_PRICE + 3) out.push({ kind: 'buy', slot: bestSlot });
   }
   for (const p of mine) {
     if (p.type === 'lord' && s.ap >= ABILITY_INFO.royal.ap && royalEffect(sv, p.id).rooted.length) out.push({ kind: 'royal', piece: p.id });
@@ -446,7 +492,56 @@ function expand(ctx: Ctx, s: Sim, moveCap: number): Cand[] {
   return out;
 }
 
+/**
+ * 배치: VIP를 뒷줄에 두고 성기사(매수 방지)와 사제(축복)를 곁에 붙인다. 농노는 앞줄에 뭉쳐 방패와 수입이 된다.
+ * 매번 자리를 조금씩 바꿔서 배치만 보고 VIP를 맞히기 어렵게 한다.
+ */
+export function decideDeploy(v: PlayerView, level: AiLevel, rand: () => number = Math.random): Action {
+  const [back, front] = HOME_ROWS[v.you];
+  const mine = v.pieces.filter((p) => p.owner === v.you);
+  const layout: Record<string, Cell> = {};
+  const used = new Set<string>();
+  const put = (id: string, r: number, c: number) => {
+    let cc = Math.max(0, Math.min(N - 1, c));
+    while (used.has(`${r},${cc}`)) cc = (cc + 1) % N;
+    used.add(`${r},${cc}`);
+    layout[id] = { r, c: cc };
+  };
+  if (level === 'easy') {
+    const cells: Cell[] = [];
+    for (const r of [back, front]) for (let c = 0; c < N; c++) cells.push({ r, c });
+    for (const p of mine) {
+      const i = Math.floor(rand() * cells.length);
+      const [cell] = cells.splice(i, 1);
+      layout[p.id] = cell;
+    }
+    return { kind: 'deploy', layout };
+  }
+  const byType = (t: PieceType) => mine.filter((p) => p.type === t);
+  const vip = mine.find((p) => p.id === v.me.orders.vip)!;
+  const center = 2 + Math.floor(rand() * 6);
+  put(vip.id, back, center);
+  const vc = layout[vip.id].c;
+  // VIP 곁: 성기사와 사제 (VIP가 그 기물이면 건너뛴다)
+  const pal = byType('paladin').find((p) => p.id !== vip.id);
+  const pri = byType('priest').find((p) => p.id !== vip.id);
+  const side = rand() < 0.5 ? -1 : 1;
+  if (pal) put(pal.id, back, vc + side);
+  if (pri) put(pri.id, back, vc - side);
+  // 나머지 궁정 기물: 궁수와 군주는 뒷줄, 자객과 첩자는 앞줄 가장자리
+  for (const p of mine) {
+    if (layout[p.id] || p.type === 'serf') continue;
+    if (p.type === 'archer' || p.type === 'lord') put(p.id, back, rand() < 0.5 ? vc + 3 + Math.floor(rand() * 2) : vc - 3 - Math.floor(rand() * 2));
+    else put(p.id, front, rand() < 0.5 ? 1 + Math.floor(rand() * 2) : N - 2 - Math.floor(rand() * 2));
+  }
+  // 농노: VIP 앞에 뭉쳐서 (결집) 방패가 된다
+  const serfs = byType('serf');
+  serfs.forEach((p, i) => put(p.id, front, vc - 1 + i - (rand() < 0.5 ? 0 : 1)));
+  return { kind: 'deploy', layout };
+}
+
 export function decide(v: PlayerView, level: AiLevel, rand: () => number = Math.random): Action {
+  if (v.phase === 'deploy') return v.deployed[v.you] ? { kind: 'end' } : decideDeploy(v, level, rand);
   if (!isMyTurn(v)) return { kind: 'end' };
   const ctx: Ctx = { v, me: v.you, opp: other(v.you), belief: vipBelief(v), level, rand };
   const root = startSim(v);

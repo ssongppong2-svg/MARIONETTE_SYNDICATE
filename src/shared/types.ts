@@ -1,4 +1,5 @@
 /** 마리오네트 신디케이트 — 규칙 엔진의 공용 타입. 서버와 화면이 함께 씁니다. */
+import type { CourtEventId } from './data';
 
 export type Faction = 'blue' | 'red';
 export const FACTIONS: readonly Faction[] = ['blue', 'red'];
@@ -69,6 +70,10 @@ export interface PlayerState {
   silverActive: boolean;
   intel: IntelNote[];
   lastIncome: number;
+  /** 궁정 상점: 남은 덱과 펼쳐 놓은 카드 (비공개) */
+  deck: CardId[];
+  market: CardId[];
+  boughtThisTurn: boolean;
 }
 
 export type ZoneId = 'outer' | 'mid' | 'court';
@@ -94,9 +99,14 @@ export interface Grave {
   turn: number;
 }
 
+export type Phase = 'deploy' | 'play';
+
 export interface GameState {
   rng: number;
   round: number;
+  /** 배치 단계: 서로 상대가 못 보게 자기 진영 안에 기물을 놓는다 */
+  phase: Phase;
+  deployed: Record<Faction, boolean>;
   /** 전체 차례 번호 (1부터, 양쪽 차례를 모두 셉니다) */
   turn: number;
   current: Faction;
@@ -122,14 +132,22 @@ export type Action =
   | { kind: 'royal'; piece: string }
   | { kind: 'interrogate'; piece: string; target: string }
   | { kind: 'bless'; piece: string; target: string }
+  | { kind: 'snipe'; piece: string; target: string }
   | { kind: 'card'; card: CardId; pieces?: string[]; cell?: Cell }
+  | { kind: 'buy'; slot: number }
+  | { kind: 'deploy'; layout: Record<string, Cell> }
   | { kind: 'end' };
 
 export type DeathCause = 'execute' | 'poison' | 'switch' | 'double';
 
 export type GameEvent =
   | { type: 'round_start'; round: number; first: Faction }
-  | { type: 'turn_start'; faction: Faction; turn: number; income: number; ap: number; famine: boolean; curfew: boolean }
+  | { type: 'turn_start'; faction: Faction; turn: number; income: number; influence: number; ap: number; famine: boolean; curfew: boolean }
+  | { type: 'deployed'; faction: Faction }
+  | { type: 'reveal' }
+  | { type: 'bought'; faction: Faction; card: CardId | null }
+  | { type: 'restock'; faction: Faction }
+  | { type: 'court_event'; event: CourtEventId }
   | { type: 'move'; piece: string; from: Cell; to: Cell; shadow: boolean }
   | { type: 'attack'; attacker: string | null; target: string; by: Faction }
   | { type: 'blocked'; target: string }

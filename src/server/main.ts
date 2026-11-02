@@ -7,7 +7,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { extname, join, normalize, resolve } from 'node:path';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { RECONNECT_SECONDS, TURN_SECONDS } from '../shared/data';
+import { DEPLOY_SECONDS, RECONNECT_SECONDS, TURN_SECONDS } from '../shared/data';
 import { Hub } from './hub';
 import type { Timings } from '../shared/match';
 
@@ -27,6 +27,7 @@ export interface ServerOptions {
 export function startServer(opts: ServerOptions) {
   const timings: Timings = {
     turnMs: TURN_SECONDS * 1000,
+    deployMs: DEPLOY_SECONDS * 1000,
     roundBreakMs: 9000,
     graceMs: RECONNECT_SECONDS * 1000,
     ...opts.timings,

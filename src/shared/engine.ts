@@ -3,8 +3,9 @@
  * 같은 seed와 같은 행동이면 언제나 같은 결과가 나옵니다.
  */
 import {
-  ABILITY_INFO, AP_PER_TURN, CARD_POOL, CARDS, COURT_COL0, COURT_ORDER, HAND_SIZE, HOME_ROWS,
-  INCOME_PER_SERF, MAX_TURNS_EACH, PIECES, SERF_COL0, SERF_COUNT, TAX_PER_SERF, TIMEOUTS_TO_LOSE,
+  ABILITY_INFO, AP_PER_TURN, CARD_POOL, CARDS, COURT_COL0, COURT_EVENT_EVERY, COURT_EVENTS, COURT_INFLUENCE,
+  COURT_ORDER, DECK_COPIES, HAND_SIZE, HOME_ROWS, INCOME_PER_SERF, MARKET_PRICE, MARKET_SIZE, MAX_TURNS_EACH,
+  PIECES, RESTOCK_EVERY, SERF_COL0, SERF_COUNT, TAX_PER_SERF, TIMEOUTS_TO_LOSE, zoneOf, type CourtEventId,
 } from './data';
 import { bribeCost, cheb, royalEffect, validate } from './rules';
 import { blessNews, bribeNews, deathNews, doubleNews, purgeNews } from './news';
@@ -38,6 +39,7 @@ function newPlayer(): PlayerState {
     ruren: 0, hand: [], usedCardThisTurn: false, turnsTaken: 0, timeouts: 0, exposed: false,
     targetDone: false, vipDone: false, vipUncertain: false, famine: false, curfew: false,
     forged: false, censor: false, silverActive: false, intel: [], lastIncome: 0,
+    deck: [], market: [], boughtThisTurn: false,
   };
 }
 
@@ -53,7 +55,8 @@ export interface Step { state: GameState; out: Emitted[] }
 
 export function createRound({ seed, round, first }: RoundSetup): Step {
   const s: GameState = {
-    rng: seed >>> 0, round, turn: 1, current: first, first, ap: AP_PER_TURN,
+    rng: seed >>> 0, round, phase: 'deploy', deployed: { blue: false, red: false },
+    turn: 1, current: first, first, ap: AP_PER_TURN,
     pieces: {}, orders: { blue: { vip: '', target: '' }, red: { vip: '', target: '' } },
     players: { blue: newPlayer(), red: newPlayer() },
     chronicle: [], newsSeq: 0, graveyard: [], revealedVips: [], winner: null, draw: false, endReason: null,
@@ -75,18 +78,31 @@ export function createRound({ seed, round, first }: RoundSetup): Step {
       vip: pickOf(s)(courtOf(s, f).map((p) => p.id)),
       target: pickOf(s)(courtOf(s, other(f)).map((p) => p.id)),
     };
-    s.players[f].hand = ['switch', ...shuffle(s, CARD_POOL).slice(0, HAND_SIZE - 1)];
+    // 덱: 암살 후 변경을 뺀 카드 종류마다 DECK_COPIES장. 손패 5장(암살 후 변경 + 4)과 상점 3장을 뽑는다.
+    const pl = s.players[f];
+    pl.deck = shuffle(s, CARD_POOL.flatMap((c) => Array<CardId>(DECK_COPIES).fill(c)));
+    const opening: CardId[] = [];
+    while (opening.length < HAND_SIZE - 1 && pl.deck.length) {
+      const i = pl.deck.findIndex((c) => !opening.includes(c));
+      opening.push(pl.deck.splice(i >= 0 ? i : 0, 1)[0]);
+    }
+    pl.hand = ['switch', ...opening];
+    pl.market = pl.deck.splice(0, MARKET_SIZE);
   }
+  // 배치 단계로 시작한다. 두 사람이 모두 배치를 마치면 첫 차례가 열린다.
   const out: Emitted[] = [{ vis: 'all', ev: { type: 'round_start', round, first } }];
-  startTurn(s, out);
   return { state: s, out };
 }
 
 /* ── 조회 ─────────────────────────────────────────── */
 const alive = (s: GameState) => Object.values(s.pieces).filter((p) => p.alive);
 const courtOf = (s: GameState, f: Faction) => alive(s).filter((p) => p.owner === f && PIECES[p.type].court);
+/** 수입을 내는 농노: 외곽 구역에 있는 (민병이 아닌) 농노 */
 const serfIncomeOf = (s: GameState, f: Faction) =>
-  alive(s).filter((p) => p.owner === f && p.type === 'serf' && !p.militia).length;
+  alive(s).filter((p) => p.owner === f && p.type === 'serf' && !p.militia && zoneOf(p.r) === 'outer').length;
+/** 궁정 영향력: 궁정 구역에 선 궁정 기물 */
+const influenceOf = (s: GameState, f: Faction) =>
+  alive(s).filter((p) => p.owner === f && PIECES[p.type].court && zoneOf(p.r) === 'court').length;
 
 /* ── 사건 기록 도우미 ──────────────────────────────── */
 function emit(out: Emitted[], ev: GameEvent, vis: Emitted['vis'] = 'all') {
@@ -98,19 +114,88 @@ function publish(s: GameState, out: Emitted[], draft: Omit<NewsItem, 'id' | 'tur
   emit(out, { type: 'news', item });
 }
 
+/* ── 배치 ─────────────────────────────────────────── */
+function applyDeploy(s: GameState, out: Emitted[], f: Faction, layout: Record<string, { r: number; c: number }>) {
+  for (const [id, cell] of Object.entries(layout)) {
+    const p = s.pieces[id];
+    p.r = cell.r;
+    p.c = cell.c;
+  }
+  markDeployed(s, out, f);
+}
+
+function markDeployed(s: GameState, out: Emitted[], f: Faction) {
+  s.deployed[f] = true;
+  emit(out, { type: 'deployed', faction: f });
+  if (FACTIONS.every((g) => s.deployed[g])) {
+    s.phase = 'play';
+    emit(out, { type: 'reveal' });
+    startTurn(s, out);
+  }
+}
+
+/* ── 궁정 상점 ─────────────────────────────────────── */
+function restock(s: GameState, out: Emitted[], f: Faction) {
+  const pl = s.players[f];
+  pl.deck.push(...pl.market);
+  pl.market = pl.deck.splice(0, MARKET_SIZE);
+  emit(out, { type: 'restock', faction: f }, f);
+}
+
+/* ── 궁정 사건 ─────────────────────────────────────── */
+function courtEvent(s: GameState, out: Emitted[]) {
+  const id = pickOf(s)(Object.keys(COURT_EVENTS) as CourtEventId[]);
+  const def = COURT_EVENTS[id];
+  let detail = '';
+  switch (id) {
+    case 'harvest': {
+      const got = FACTIONS.map((f) => {
+        const n = serfIncomeOf(s, f) * 3;
+        s.players[f].ruren += n;
+        return n;
+      });
+      detail = `청실은 ${got[0]}, 홍실은 ${got[1]} 루렌을 거두었다.`;
+      break;
+    }
+    case 'amnesty':
+      for (const p of alive(s)) { p.rootedUntil = 0; p.blessedUntil = 0; p.poison = null; }
+      detail = '감옥 문이 열리고, 독잔은 비워졌다.';
+      break;
+    case 'caravan':
+      for (const f of FACTIONS) restock(s, out, f);
+      detail = '먼 나라의 상단이 새 밀서를 싣고 왔다.';
+      break;
+    case 'banquet': {
+      const [b, r] = FACTIONS.map((f) => influenceOf(s, f));
+      if (b !== r) {
+        const w: Faction = b > r ? 'blue' : 'red';
+        s.players[w].ruren += 5;
+        detail = `왕의 곁에 더 많이 선 ${w === 'blue' ? '청실' : '홍실'}에게 5 루렌이 내려졌다.`;
+      } else detail = '연회장의 자리는 똑같이 나뉘었다. 아무도 상을 받지 못했다.';
+      break;
+    }
+  }
+  publish(s, out, { tag: '궁정 공고', title: def.name, body: `${def.text} ${detail}`, zone: null, censored: false, tone: 'gold' });
+  emit(out, { type: 'court_event', event: id });
+}
+
 /* ── 차례 ─────────────────────────────────────────── */
 function startTurn(s: GameState, out: Emitted[]) {
   const f = s.current;
   const pl = s.players[f];
-  const income = pl.famine ? 0 : serfIncomeOf(s, f) * INCOME_PER_SERF;
+  if (s.turn > 1 && (s.turn - 1) % COURT_EVENT_EVERY === 0) courtEvent(s, out);
+  if (pl.turnsTaken > 0 && pl.turnsTaken % RESTOCK_EVERY === 0) restock(s, out, f);
+  const influence = pl.famine ? 0 : influenceOf(s, f) * COURT_INFLUENCE;
+  const income = pl.famine ? 0 : serfIncomeOf(s, f) * INCOME_PER_SERF + influence;
   pl.ruren += income;
   pl.lastIncome = income;
   s.ap = Math.max(0, AP_PER_TURN - (pl.curfew ? 1 : 0));
-  emit(out, { type: 'turn_start', faction: f, turn: s.turn, income, ap: s.ap, famine: pl.famine, curfew: pl.curfew });
+  emit(out, { type: 'turn_start', faction: f, turn: s.turn, income, influence, ap: s.ap, famine: pl.famine, curfew: pl.curfew });
   pl.famine = false;
   pl.curfew = false;
   pl.usedCardThisTurn = false;
   pl.silverActive = false;
+  pl.boughtThisTurn = false;
 }
 
 function finishTurn(s: GameState, out: Emitted[]) {
@@ -127,6 +212,7 @@ function finishTurn(s: GameState, out: Emitted[]) {
   s.players[f].turnsTaken += 1;
   s.players[f].usedCardThisTurn = false;
   s.players[f].silverActive = false;
+  s.players[f].boughtThisTurn = false;
   if (FACTIONS.every((g) => s.players[g].turnsTaken >= MAX_TURNS_EACH)) {
     judge(s, out);
     return;
@@ -179,6 +265,11 @@ function judge(s: GameState, out: Emitted[]) {
 export function timeout(s: GameState): Step {
   const out: Emitted[] = [];
   if (s.winner || s.draw) return { state: s, out };
+  if (s.phase === 'deploy') {
+    // 배치 시간이 끝나면 아직 마치지 않은 쪽은 지금 놓인 그대로 시작한다
+    for (const f of FACTIONS) if (!s.deployed[f] && s.phase === 'deploy') markDeployed(s, out, f);
+    return { state: s, out };
+  }
   const f = s.current;
   s.players[f].timeouts += 1;
   emit(out, { type: 'timeout', faction: f });
@@ -261,13 +352,33 @@ function killPiece(s: GameState, out: Emitted[], victim: Piece, killer: Faction,
 /* ── 행동 적용 ────────────────────────────────────── */
 export interface ApplyResult extends Step { error: string | null }
 
-export function apply(s: GameState, a: Action): ApplyResult {
+/**
+ * 행동을 적용한다. actor는 행동하는 쪽 (배치는 두 사람이 동시에 하므로 차례와 상관없이 받는다).
+ */
+export function apply(s: GameState, a: Action, actor: Faction = s.current): ApplyResult {
   const out: Emitted[] = [];
-  const error = validate(viewFor(s, s.current), a);
+  const error = validate(viewFor(s, actor), a);
   if (error) return { state: s, out, error };
+  if (a.kind === 'deploy') {
+    applyDeploy(s, out, actor, a.layout);
+    return { state: s, out, error: null };
+  }
   const me = s.current;
   const opp = other(me);
   const pl = s.players[me];
+
+  if (a.kind === 'buy') {
+    const card = pl.market.splice(a.slot, 1)[0];
+    pl.hand.push(card);
+    pl.ruren -= MARKET_PRICE;
+    s.ap -= 1;
+    pl.boughtThisTurn = true;
+    pl.timeouts = 0;
+    if (pl.deck.length) pl.market.push(pl.deck.shift()!);
+    emit(out, { type: 'bought', faction: me, card }, me);
+    emit(out, { type: 'bought', faction: me, card: null }, opp);
+    return { state: s, out, error: null };
+  }
 
   if (a.kind === 'end') {
     pl.timeouts = 0;
@@ -281,6 +392,7 @@ export function apply(s: GameState, a: Action): ApplyResult {
     return { state: s, out, error: null };
   }
 
+  if (!('piece' in a)) return { state: s, out, error: null };
   const p = s.pieces[a.piece];
   switch (a.kind) {
     case 'move': {
@@ -291,18 +403,21 @@ export function apply(s: GameState, a: Action): ApplyResult {
       emit(out, { type: 'move', piece: p.id, from, to: { ...a.to }, shadow: false });
       break;
     }
-    case 'execute': {
-      s.ap -= 1;
+    case 'execute':
+    case 'snipe': {
+      s.ap -= a.kind === 'snipe' ? ABILITY_INFO.snipe.ap : 1;
       const t = s.pieces[a.target];
+      // 자객의 암습은 축복과 대역을 무시한다
+      const ambush = p.type === 'assassin' && !p.militia;
       emit(out, { type: 'attack', attacker: p.id, target: t.id, by: me }, me);
       emit(out, { type: 'attack', attacker: null, target: t.id, by: me }, opp);
-      if (t.blessedUntil >= s.turn) {
+      if (t.blessedUntil >= s.turn && !ambush) {
         t.blessedUntil = 0;
         emit(out, { type: 'blocked', target: t.id });
         publish(s, out, blessNews({ type: t.type, owner: t.owner, r: t.r, militia: t.militia }, pickOf(s)));
         break;
       }
-      if (t.double) {
+      if (t.double && !ambush) {
         const subs = alive(s).filter((q) => q.owner === t.owner && q.type === 'serf' && cheb(q, t) === 1);
         if (subs.length) {
           const sub = pickOf(s)(subs);

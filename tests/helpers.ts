@@ -61,6 +61,11 @@ export class TestClient {
 
 /** 아주 단순한 테스트 봇: 칠 수 있으면 치고, 아니면 가장 가까운 적에게 다가가고, 그것도 없으면 차례를 넘긴다 */
 export function botMove(v: PlayerView): Action | null {
+  if (v.phase === 'deploy') {
+    if (v.deployed[v.you] || v.winner || v.draw) return null;
+    // 지금 놓인 그대로 배치를 마친다
+    return { kind: 'deploy', layout: Object.fromEntries(v.pieces.filter((p) => p.owner === v.you).map((p) => [p.id, { r: p.r, c: p.c }])) };
+  }
   if (!isMyTurn(v)) return null;
   const mine = v.pieces.filter((p) => p.owner === v.you);
   const foes = v.pieces.filter((p) => p.owner !== v.you);
@@ -74,7 +79,7 @@ export function botMove(v: PlayerView): Action | null {
     }
     let best: { piece: string; to: { r: number; c: number }; gain: number } | null = null;
     for (const p of mine) {
-      if (PIECES[p.type].exec <= 0 && !p.militia) continue;
+      if (PIECES[p.type].exec <= 0 && !p.militia && p.type !== 'serf') continue;
       const now = Math.min(...foes.map((f) => cheb(p, f)));
       for (const to of reachable(v, p.id)) {
         const d = Math.min(...foes.map((f) => cheb(to, f)));

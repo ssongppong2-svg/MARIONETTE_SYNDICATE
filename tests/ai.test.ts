@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { decide, vipBelief, type AiLevel } from '../src/shared/ai';
-import { apply, createRound } from '../src/shared/engine';
+import { apply, createRound, timeout } from '../src/shared/engine';
 import type { Faction } from '../src/shared/types';
 import { viewFor } from '../src/shared/view';
 
@@ -13,6 +13,12 @@ function rng(seed: number) {
 function duel(seed: number, levels: Record<Faction, AiLevel>) {
   const { state: s } = createRound({ seed, round: 1, first: seed % 2 ? 'blue' : 'red' });
   const r = rng(seed * 7 + 1);
+  // 배치: 두 AI가 각자 놓는다
+  for (const f of ['blue', 'red'] as Faction[]) {
+    const res = apply(s, decide(viewFor(s, f), levels[f], r), f);
+    if (res.error) throw new Error(`배치 실패: ${res.error}`);
+  }
+  expect(s.phase).toBe('play');
   let actions = 0;
   while (!s.winner && !s.draw && actions < 2000) {
     const v = viewFor(s, s.current);
@@ -25,6 +31,16 @@ function duel(seed: number, levels: Record<Faction, AiLevel>) {
 }
 
 describe('AI', () => {
+  it('배치에서 VIP를 뒷줄에 두고 모든 기물을 자기 진영 안에 놓는다', () => {
+    for (const level of ['easy', 'normal', 'hard'] as AiLevel[]) {
+      const { state } = createRound({ seed: 9, round: 1, first: 'blue' });
+      const a = decide(viewFor(state, 'red'), level, rng(2));
+      expect(a.kind).toBe('deploy');
+      expect(apply(state, a, 'red').error).toBeNull();
+      if (level !== 'easy') expect(state.pieces[state.orders.red.vip].r).toBe(9);
+    }
+  });
+
   it('상대의 비밀을 받지 않는다 — 화면용 상태만으로 둔다', () => {
     const { state } = createRound({ seed: 3, round: 1, first: 'blue' });
     const v = viewFor(state, 'blue');
@@ -34,6 +50,7 @@ describe('AI', () => {
 
   it('정보가 없으면 상대 궁정 기물 모두를 똑같이 의심한다', () => {
     const { state } = createRound({ seed: 3, round: 1, first: 'blue' });
+    timeout(state);
     const b = vipBelief(viewFor(state, 'blue'));
     expect(b.size).toBe(6);
     for (const p of b.values()) expect(p).toBeCloseTo(1 / 6, 5);
@@ -41,6 +58,7 @@ describe('AI', () => {
 
   it('심문 결과를 믿음에 반영한다', () => {
     const { state } = createRound({ seed: 3, round: 1, first: 'blue' });
+    timeout(state);
     const vip = state.orders.red.vip;
     state.players.blue.intel.push({ turn: 1, kind: 'interrogate', subjects: [vip], result: true });
     const b = vipBelief(viewFor(state, 'blue'));

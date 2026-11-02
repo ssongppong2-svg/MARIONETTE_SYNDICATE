@@ -1,14 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { CARD_POOL, CARDS, INCOME_PER_SERF, MAX_TURNS_EACH, PIECES } from '../src/shared/data';
+import {
+  CARD_POOL, CARDS, COURT_EVENT_EVERY, DECK_COPIES, HAND_LIMIT, INCOME_PER_SERF, MARKET_PRICE, MARKET_SIZE,
+  MAX_TURNS_EACH, PIECES, RESTOCK_EVERY,
+} from '../src/shared/data';
 import { apply, createRound, eventsFor, timeout } from '../src/shared/engine';
 import { josa } from '../src/shared/korean';
-import { bribeOptions, execTargets, reachable } from '../src/shared/rules';
+import { bribeOptions, execRange, execTargets, reachable, snipeTargets } from '../src/shared/rules';
 import type { Action, CardId, Faction, GameState } from '../src/shared/types';
 import { viewFor } from '../src/shared/view';
 
 /* ── 도우미 ─────────────────────────────────────── */
+/** 판을 만들고 두 사람 모두 기본 배치로 시작한다 */
 function fresh(seed = 7, first: Faction = 'blue'): GameState {
-  return createRound({ seed, round: 1, first }).state;
+  const s = createRound({ seed, round: 1, first }).state;
+  timeout(s);
+  return s;
 }
 function idOf(s: GameState, f: Faction, type: string, n = 0): string {
   return Object.values(s.pieces).filter((p) => p.owner === f && p.type === type)[n].id;
@@ -72,6 +78,32 @@ describe('판 시작', () => {
     expect(s.players.blue.ruren).toBe(4 * INCOME_PER_SERF);
     expect(s.ap).toBe(3);
     expect(s.players.red.ruren).toBe(0);
+  });
+
+  it('배치 단계로 시작하고, 두 사람이 모두 마치면 첫 차례가 열린다', () => {
+    const { state: s } = createRound({ seed: 5, round: 1, first: 'red' });
+    expect(s.phase).toBe('deploy');
+    const blue = viewFor(s, 'blue');
+    expect(blue.pieces.every((p) => p.owner === 'blue')).toBe(true);
+    expect(blue.me.targetType).toBe(s.pieces[s.orders.blue.target].type);
+    const mine = (f: Faction) => Object.values(s.pieces).filter((p) => p.owner === f);
+    // 청: 군주와 첫 농노의 자리를 바꾼다
+    const layout = Object.fromEntries(mine('blue').map((p) => [p.id, { r: p.r, c: p.c }]));
+    const lord = mine('blue').find((p) => p.type === 'lord')!;
+    const serf = mine('blue').find((p) => p.type === 'serf')!;
+    [layout[lord.id], layout[serf.id]] = [layout[serf.id], layout[lord.id]];
+    expect(apply(s, { kind: 'deploy', layout: { ...layout, [lord.id]: { r: 5, c: 5 } } }, 'blue').error).toContain('진영');
+    expect(apply(s, { kind: 'deploy', layout }, 'blue').error).toBeNull();
+    expect(s.pieces[lord.id].r).toBe(1);
+    expect(apply(s, { kind: 'move', piece: lord.id, to: { r: 2, c: lord.c } }, 'blue').error).toContain('배치');
+    expect(apply(s, { kind: 'deploy', layout }, 'blue').error).toContain('이미');
+    const redLayout = Object.fromEntries(mine('red').map((p) => [p.id, { r: p.r, c: p.c }]));
+    const res = apply(s, { kind: 'deploy', layout: redLayout }, 'red');
+    expect(res.error).toBeNull();
+    expect(s.phase).toBe('play');
+    expect(res.out.some((e) => e.ev.type === 'reveal')).toBe(true);
+    expect(s.current).toBe('red');
+    expect(viewFor(s, 'blue').pieces).toHaveLength(20);
   });
 
   it('같은 seed면 같은 판이 나온다', () => {
@@ -498,6 +530,141 @@ describe('시간 초과와 궁정 심판', () => {
     for (let i = 0; i < MAX_TURNS_EACH * 2; i++) endTurn(s);
     expect(s.winner).toBe('blue');
     expect(s.endReason).toContain('궁정 심판');
+  });
+});
+
+/* ── 구역, 기물 능력, 상점, 궁정 사건 ─────────── */
+describe('구역', () => {
+  it('외곽의 농노만 수입을 내고, 궁정 구역의 궁정 기물은 영향력을 낸다', () => {
+    const s = fresh(12);
+    const serfs = Object.values(s.pieces).filter((p) => p.owner === 'blue' && p.type === 'serf');
+    const spy = idOf(s, 'blue', 'spy');
+    const pal = idOf(s, 'blue', 'paladin');
+    s.pieces[serfs[0].id].r = 3; // 전장으로 나간 농노 → 수입 없음
+    s.pieces[spy].r = 4; s.pieces[spy].c = 0; // 궁정 구역
+    s.pieces[pal].r = 5; s.pieces[pal].c = 9; // 궁정 구역
+    endTurn(s); endTurn(s);
+    expect(s.players.blue.lastIncome).toBe(3 * INCOME_PER_SERF + 2);
+  });
+});
+
+describe('기물 능력', () => {
+  it('성기사 호위: 성기사와 그 곁의 아군은 매수 후보가 아니다', () => {
+    const s = fresh(13);
+    const spy = idOf(s, 'blue', 'spy');
+    const pal = idOf(s, 'red', 'paladin');
+    const near = idOf(s, 'red', 'serf', 0);
+    const far = idOf(s, 'red', 'serf', 1);
+    clearBoard(s, [[spy, 5, 5], [pal, 5, 7], [near, 5, 6], [far, 4, 5], [s.orders.red.vip, 9, 9], [s.orders.blue.vip, 0, 0]]);
+    s.players.blue.turnsTaken = 3;
+    s.players.blue.ruren = 20;
+    const ids = bribeOptions(viewFor(s, 'blue'), spy).map((o) => o.id);
+    expect(ids).toContain(far);
+    expect(ids).not.toContain(near);
+    expect(mustFail(s, { kind: 'bribe', piece: spy, target: near })).toContain('성기사');
+  });
+
+  it('자객 암습: 축복과 대역을 무시한다', () => {
+    const s = fresh(14);
+    const asn = idOf(s, 'blue', 'assassin');
+    const t = idOf(s, 'red', 'archer');
+    const serf = idOf(s, 'red', 'serf');
+    clearBoard(s, [[asn, 5, 5], [t, 6, 6], [serf, 6, 7], [s.orders.red.vip, 9, 9], [s.orders.blue.vip, 0, 0]]);
+    s.pieces[t].blessedUntil = 99;
+    s.pieces[t].double = true;
+    act(s, { kind: 'execute', piece: asn, target: t });
+    expect(s.pieces[t].alive).toBe(false);
+    expect(s.pieces[serf].alive).toBe(true);
+  });
+
+  it('궁수 저격: 2 AP로 네 칸 밖까지', () => {
+    const s = fresh(15);
+    const arc = idOf(s, 'blue', 'archer');
+    const t = idOf(s, 'red', 'serf');
+    clearBoard(s, [[arc, 2, 2], [t, 6, 2], [s.orders.red.vip, 9, 9], [s.orders.blue.vip, 0, 0]]);
+    const v = viewFor(s, 'blue');
+    expect(execTargets(v, arc)).not.toContain(t);
+    expect(snipeTargets(v, arc)).toContain(t);
+    act(s, { kind: 'snipe', piece: arc, target: t });
+    expect(s.pieces[t].alive).toBe(false);
+    expect(s.ap).toBe(1);
+  });
+
+  it('농노 결집: 다른 농노 둘과 붙어 있으면 맞서 싸운다', () => {
+    const s = fresh(16);
+    const [a, b, c] = Object.values(s.pieces).filter((p) => p.owner === 'blue' && p.type === 'serf').map((p) => p.id);
+    const foe = idOf(s, 'red', 'spy');
+    clearBoard(s, [[a, 4, 4], [b, 4, 3], [c, 4, 5], [foe, 5, 4], [s.orders.red.vip, 9, 9], [s.orders.blue.vip, 0, 0]]);
+    let v = viewFor(s, 'blue');
+    expect(execRange(v.pieces.find((p) => p.id === a)!, v.pieces)).toBe(1);
+    expect(execTargets(v, b)).toEqual([]);
+    act(s, { kind: 'execute', piece: a, target: foe });
+    expect(s.pieces[foe].alive).toBe(false);
+    s.pieces[c].r = 7;
+    v = viewFor(s, 'blue');
+    expect(execRange(v.pieces.find((p) => p.id === a)!, v.pieces)).toBe(0);
+  });
+});
+
+describe('궁정 상점', () => {
+  it(`덱은 종류마다 ${DECK_COPIES}장, 상점에 ${MARKET_SIZE}장이 펼쳐진다`, () => {
+    const s = fresh(17);
+    const pl = s.players.blue;
+    expect(pl.market).toHaveLength(MARKET_SIZE);
+    expect(pl.deck.length + pl.market.length + pl.hand.length - 1).toBe(CARD_POOL.length * DECK_COPIES);
+    expect(viewFor(s, 'red')).not.toHaveProperty('opponent.market');
+  });
+
+  it(`1 AP와 ${MARKET_PRICE} 루렌으로 한 장 사고, 상점은 덱에서 다시 채워진다`, () => {
+    const s = fresh(18);
+    s.players.blue.ruren = 10;
+    const card = s.players.blue.market[1];
+    const res = act(s, { kind: 'buy', slot: 1 });
+    expect(s.players.blue.hand).toContain(card);
+    expect(s.players.blue.ruren).toBe(10 - MARKET_PRICE);
+    expect(s.ap).toBe(2);
+    expect(s.players.blue.market).toHaveLength(MARKET_SIZE);
+    expect(eventsFor(res.out, 'red').find((e) => e.type === 'bought')).toMatchObject({ card: null });
+    expect(mustFail(s, { kind: 'buy', slot: 0 })).toContain('한 장');
+  });
+
+  it(`손패는 ${HAND_LIMIT}장까지`, () => {
+    const s = fresh(19);
+    s.players.blue.ruren = 30;
+    s.players.blue.hand = Array(HAND_LIMIT).fill('tax');
+    expect(mustFail(s, { kind: 'buy', slot: 0 })).toContain(`${HAND_LIMIT}장`);
+  });
+
+  it(`자기 차례 ${RESTOCK_EVERY}번마다 상점이 새 카드로 바뀐다`, () => {
+    const s = fresh(20);
+    const before = [...s.players.blue.market];
+    const deckTop = s.players.blue.deck.slice(0, MARKET_SIZE);
+    for (let i = 0; i < RESTOCK_EVERY * 2; i++) endTurn(s);
+    expect(s.players.blue.market).toEqual(deckTop);
+    expect(s.players.blue.deck.slice(-MARKET_SIZE)).toEqual(before);
+  });
+});
+
+describe('궁정 사건', () => {
+  it(`전체 차례 ${COURT_EVENT_EVERY}번마다 궁정 공고가 나온다`, () => {
+    const s = fresh(21);
+    let found = false;
+    for (let i = 0; i < COURT_EVENT_EVERY; i++) {
+      const res = endTurn(s);
+      if (res.out.some((e) => e.ev.type === 'court_event')) found = true;
+    }
+    expect(found).toBe(true);
+    expect(s.chronicle.some((n) => n.tag === '궁정 공고')).toBe(true);
+  });
+});
+
+describe('배치 시간', () => {
+  it('배치 시간이 끝나면 놓인 그대로 시작한다', () => {
+    const { state: s } = createRound({ seed: 22, round: 1, first: 'blue' });
+    const res = timeout(s);
+    expect(s.phase).toBe('play');
+    expect(res.out.filter((e) => e.ev.type === 'deployed')).toHaveLength(2);
+    expect(s.players.blue.timeouts).toBe(0);
   });
 });
 

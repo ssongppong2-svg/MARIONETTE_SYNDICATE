@@ -16,6 +16,8 @@ type Timer = ReturnType<typeof setTimeout>;
 export interface Timings {
   /** 0이면 차례 시간 제한이 없다 (AI 대전) */
   turnMs: number;
+  /** 배치 단계 시간. 0이면 제한 없음 */
+  deployMs?: number;
   roundBreakMs: number;
   graceMs: number;
 }
@@ -121,9 +123,10 @@ export class Match {
   private resetTurnTimer() {
     if (this.turnTimer) clearTimeout(this.turnTimer);
     this.turnTimer = null;
-    if (this.phase !== 'playing' || this.timings.turnMs <= 0) { this.deadline = null; return; }
-    this.deadline = Date.now() + this.timings.turnMs;
-    this.turnTimer = setTimeout(() => this.onTurnTimeout(), this.timings.turnMs);
+    const ms = this.state?.phase === 'deploy' ? (this.timings.deployMs ?? this.timings.turnMs) : this.timings.turnMs;
+    if (this.phase !== 'playing' || ms <= 0) { this.deadline = null; return; }
+    this.deadline = Date.now() + ms;
+    this.turnTimer = setTimeout(() => this.onTurnTimeout(), ms);
   }
 
   private onTurnTimeout() {
@@ -134,11 +137,14 @@ export class Match {
 
   act(f: Faction, action: Action): string | null {
     if (this.phase !== 'playing') return '지금은 둘 수 없다.';
-    if (this.state.current !== f) return '내 차례가 아니다.';
+    // 배치는 두 사람이 동시에 한다. 그 밖의 행동은 자기 차례에만.
+    if (action.kind !== 'deploy' && this.state.phase === 'deploy') return '아직 배치 중이다.';
+    if (action.kind !== 'deploy' && this.state.current !== f) return '내 차례가 아니다.';
     const turnBefore = this.state.turn;
-    const res = apply(this.state, action);
+    const phaseBefore = this.state.phase;
+    const res = apply(this.state, action, f);
     if (res.error) return res.error;
-    this.afterStep(res.out, this.state.turn !== turnBefore);
+    this.afterStep(res.out, this.state.turn !== turnBefore || this.state.phase !== phaseBefore);
     return null;
   }
 

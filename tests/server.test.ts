@@ -8,7 +8,7 @@ type Running = Awaited<ReturnType<typeof startServer>>;
 let server: Running | null = null;
 const clients: TestClient[] = [];
 
-async function boot(timings: { turnMs?: number; roundBreakMs?: number; graceMs?: number } = {}) {
+async function boot(timings: { turnMs?: number; deployMs?: number; roundBreakMs?: number; graceMs?: number } = {}) {
   server = await startServer({ port: 0, staticDir: '/nonexistent', timings: { turnMs: 5000, roundBreakMs: 50, graceMs: 2000, ...timings } });
   return server.port;
 }
@@ -62,7 +62,7 @@ describe('대전 서버', () => {
     const port = await boot();
     const { a, b } = await pair(port);
     autoplay(a, b);
-    await a.waitFor((m) => m.t === 'round_over', 20000);
+    await a.waitFor((m) => m.t === 'round_over', 50000);
     const myOrders = (c: TestClient) => c.log.find((m) => m.t === 'state' && m.view.me.orders) as Extract<ServerMsg, { t: 'state' }>;
     const enemyVipOfA = myOrders(b).view.me.orders.vip;
     for (const m of a.log) {
@@ -74,8 +74,9 @@ describe('대전 서버', () => {
       }
       expect(m.view.me.hand.length).toBeLessThanOrEqual(5);
       expect(m.view.opponent).not.toHaveProperty('hand');
+      expect(m.view.opponent).not.toHaveProperty('market');
     }
-  });
+  }, 60000);
 
   it('방 코드로 친구와 대전한다 (틀린 코드는 거절)', async () => {
     const port = await boot();
@@ -96,6 +97,16 @@ describe('대전 서버', () => {
   it('규칙에 어긋난 행동과 남의 차례 행동은 거절한다', async () => {
     const port = await boot();
     const { a, b, fa } = await pair(port);
+    // 배치 단계에는 차례 행동을 받지 않는다
+    a.send({ t: 'action', action: { kind: 'end' } });
+    const e0 = await a.waitFor((m) => m.t === 'error');
+    expect(e0.t === 'error' && e0.message).toContain('배치');
+    for (const c of [a, b]) {
+      const v = c.lastState()!.view;
+      c.send({ t: 'action', action: botMove(v)! });
+    }
+    await a.waitFor((m) => m.t === 'state' && m.view.phase === 'play');
+    await b.waitFor((m) => m.t === 'state' && m.view.phase === 'play');
     const st = a.lastState()!;
     const [first, second] = st.view.current === fa ? [a, b] : [b, a];
     second.send({ t: 'action', action: { kind: 'end' } });
@@ -110,7 +121,7 @@ describe('대전 서버', () => {
     const port = await boot();
     const { a, b } = await pair(port);
     autoplay(a, b);
-    const end = await a.waitFor((m) => m.t === 'match_over', 60000);
+    const end = await a.waitFor((m) => m.t === 'match_over', 110000);
     if (end.t !== 'match_over') throw new Error();
     expect(end.match.scores[end.winner]).toBe(2);
     const endB = await b.waitFor((m) => m.t === 'match_over');
@@ -121,10 +132,10 @@ describe('대전 서버', () => {
       expect(r.orders.blue.vip).toBeTruthy();
       expect(r.orders.red.target).toBeTruthy();
     }
-  }, 70000);
+  }, 120000);
 
   it('아무도 두지 않으면 시간 초과가 쌓여 판을 지고, 매치가 끝난다', async () => {
-    const port = await boot({ turnMs: 40 });
+    const port = await boot({ turnMs: 40, deployMs: 40 });
     const { a } = await pair(port);
     const end = await a.waitFor((m) => m.t === 'match_over', 15000);
     expect(end.t === 'match_over' && end.reason).toContain('시간');
