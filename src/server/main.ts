@@ -9,7 +9,7 @@ import { extname, join, normalize, resolve } from 'node:path';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { RECONNECT_SECONDS, TURN_SECONDS } from '../shared/data';
 import { Hub } from './hub';
-import type { Timings } from './match';
+import type { Timings } from '../shared/match';
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',

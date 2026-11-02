@@ -1,6 +1,9 @@
 /** 플레이어 설정 (이 브라우저에만 저장) */
+import type { AiLevel } from '../shared/ai';
+
 export interface Settings {
   name: string;
+  aiLevel: AiLevel;
   sfx: number;
   music: number;
   shake: boolean;
@@ -11,7 +14,7 @@ export interface Settings {
 const KEY = 'ms.settings.v1';
 const prefersReduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-const defaults: Settings = { name: '', sfx: 0.8, music: 0.45, shake: true, reduceMotion: prefersReduced, coords: true };
+const defaults: Settings = { name: '', aiLevel: 'normal', sfx: 0.8, music: 0.45, shake: true, reduceMotion: prefersReduced, coords: true };
 
 function load(): Settings {
   try {

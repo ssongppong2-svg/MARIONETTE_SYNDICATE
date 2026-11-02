@@ -3,7 +3,7 @@
 > 금빛 궁정 위에 피와 그림자가 얹힌 중세 정치 암살극.
 > 사람을 자원으로 삼고, 정보를 숨기고, 단 한 번의 처형으로 권력이 뒤집힌다.
 
-10 × 10 보드에서 두 사람이 겨루는 **온라인 1대1 심리전 보드게임**입니다. 3판 2선승제이고, 스팀 출시를 목표로 합니다.
+10 × 10 보드에서 두 사람이 겨루는 **1대1 심리전 보드게임**입니다. 온라인 대전과 AI 대전이 있고, 3판 2선승제이며, 스팀 출시를 목표로 합니다.
 규칙과 아트 디렉션은 [`docs/DESIGN.md`](docs/DESIGN.md)에 있습니다.
 
 ## 실행
@@ -16,7 +16,11 @@ npm run dev      # 개발: 대전 서버(8787) + 화면(http://localhost:5173)
 npm test         # 규칙 엔진 + 대전 서버 테스트
 npm run build    # dist/ (화면) + dist-server/ (서버)
 npm start        # 빌드한 것을 한 프로그램으로 실행: http://localhost:8787
+npm run build:artifact   # 서버 없이 AI 대전만 하는 파일 하나짜리 페이지: dist-artifact/marionette-syndicate.html
 ```
+
+**AI 대전**은 서버 없이 브라우저 안에서 돌아갑니다. 난이도는 쉬움, 보통, 어려움 세 단계이고, 차례 시간 제한이 없습니다.
+AI도 사람과 똑같이 자기 화면에 보이는 정보만 씁니다. 상대의 VIP는 심문, 밀정의 보고, 공개된 사실로 추리합니다.
 
 친구와 두려면 서버를 인터넷에 올려야 합니다. `npm start` 하나가 화면과 대전 서버를 함께 띄우므로,
 Node를 돌릴 수 있는 곳(Render, Railway, Fly.io, 개인 서버 등)이면 됩니다.
@@ -46,11 +50,11 @@ Vercel처럼 실시간 연결(WebSocket)을 오래 유지하지 못하는 곳은
 ```
 src/shared   규칙 엔진 (서버와 화면이 함께 씀)
              data(수치·기물·카드) · engine(판 진행) · rules(할 수 있는 것) · view(보여 줄 정보만)
-             news(궁정 신문) · korean(조사) · protocol(메시지)
-src/server   대전 서버: hub(접속·대기열·방 코드·재접속) · match(3판 2선승·시간) · main(HTTP + WebSocket)
+             match(3판 2선승·시간) · ai(컴퓨터 상대) · news(궁정 신문) · korean(조사) · protocol(메시지)
+src/server   대전 서버: hub(접속·대기열·방 코드·재접속) · main(HTTP + WebSocket)
 src/client   화면: board(PixiJS 보드·그림·연출) · game(대전 화면) · ui(타이틀·로비·법전·설정)
-             audio(Web Audio 합성 효과음·배경음) · net(재연결) · assets(교체용 그림·소리)
-tests        engine.test.ts · server.test.ts (두 봇이 실제로 접속해 매치를 끝까지 둡니다)
+             local(브라우저 안의 AI 대전) · audio(Web Audio 합성 효과음·배경음) · net(재연결) · assets(교체용 그림·소리)
+tests        engine.test.ts · server.test.ts (두 봇이 실제로 접속해 매치를 끝까지 둡니다) · ai.test.ts
 docs         DESIGN.md (설계서) · prototype/ (6월 프로토타입, 참고용)
 ```
 

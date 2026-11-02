@@ -7,7 +7,7 @@ import type { ClientMsg, ServerMsg } from '../shared/protocol';
 import { NAME_MAX, PROTOCOL_VERSION, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from '../shared/protocol';
 import type { Faction } from '../shared/types';
 import { FACTIONS } from '../shared/types';
-import { Match, type Timings } from './match';
+import { Match, type Timings } from '../shared/match';
 
 interface Client {
   token: string;

@@ -2,12 +2,7 @@
  * 마리오네트 신디케이트 — 화면 진입점.
  * 타이틀 → 로비 → (대기) → 대전. 화면 전환은 서버 메시지가 이끕니다.
  */
-import '@fontsource/cinzel/400.css';
-import '@fontsource/cinzel/600.css';
-import '@fontsource/cinzel/700.css';
-import '@fontsource/nanum-myeongjo/400.css';
-import '@fontsource/nanum-myeongjo/700.css';
-import '@fontsource/nanum-myeongjo/800.css';
+import './fonts';
 import './styles.css';
 
 import type { ServerMsg } from '../shared/protocol';
@@ -16,10 +11,14 @@ import { loadManifest } from './assets';
 import { audio } from './audio';
 import { grainDataUrl } from './board/art';
 import { GameScreen } from './game/game';
+import { LocalLink, type Link } from './local';
 import { Net, type NetStatus } from './net';
 import { saveSettings, settings } from './settings';
 import { el, esc, modal, toast } from './ui/dom';
 import { lobbyScreen, titleScreen, waitingScreen } from './ui/screens';
+
+/** 서버 없이 AI 대전만 하는 빌드 (claude.ai 페이지 등) */
+const OFFLINE = import.meta.env.VITE_OFFLINE === '1';
 
 type Screen =
   | { kind: 'title' }
@@ -35,6 +34,7 @@ class App {
   private online = 0;
   private netbar: HTMLElement | null = null;
   private entered = false;
+  private local: LocalLink | null = null;
 
   constructor(root: HTMLElement) {
     document.body.insertAdjacentHTML('afterbegin', '<div class="backdrop"></div>');
@@ -55,6 +55,8 @@ class App {
   }
 
   private clear() {
+    this.local?.dispose();
+    this.local = null;
     if (this.screen.kind === 'waiting') this.screen.dispose();
     if (this.screen.kind === 'game') this.screen.game.dispose();
     this.host.innerHTML = '';
@@ -67,7 +69,7 @@ class App {
       this.name = name;
       this.entered = true;
       audio.startMusic();
-      this.net.connect(name);
+      if (!OFFLINE) this.net.connect(name);
       this.showLobby();
     });
   }
@@ -75,12 +77,25 @@ class App {
   private showLobby() {
     this.clear();
     const lobby = lobbyScreen(this.host, this.name || '이름 없는 자', this.online, {
+      ai: (level) => this.startAi(level),
       quick: () => this.net.send({ t: 'quick' }) || this.offline(),
       createRoom: () => this.net.send({ t: 'create_room' }) || this.offline(),
       joinRoom: (code) => this.net.send({ t: 'join_room', code }) || this.offline(),
       rename: () => this.rename(),
-    });
+    }, { online: !OFFLINE });
     this.screen = { kind: 'lobby', setOnline: lobby.setOnline };
+  }
+
+  private startAi(level: Parameters<LobbyArg['ai']>[0]) {
+    this.clear();
+    const link = new LocalLink((m) => this.onLocal(m), this.name || settings.name || '이름 없는 자', level);
+    this.ensureGame(link);
+    this.local = link;
+    link.start();
+  }
+
+  private onLocal(m: ServerMsg) {
+    if (this.screen.kind === 'game') this.screen.game.handle(m);
   }
 
   private offline() {
@@ -101,18 +116,17 @@ class App {
           this.name = name;
           close();
           // 새 이름으로 다시 인사한다 (같은 토큰)
-          this.net.connect(name);
-          this.net.reconnect();
+          if (!OFFLINE) { this.net.connect(name); this.net.reconnect(); }
           this.showLobby();
         });
       },
     });
   }
 
-  private ensureGame(): GameScreen {
+  private ensureGame(link: Link = this.net): GameScreen {
     if (this.screen.kind === 'game') return this.screen.game;
     this.clear();
-    const game = new GameScreen(this.host, this.net, () => this.showLobby());
+    const game = new GameScreen(this.host, link, () => this.showLobby());
     this.screen = { kind: 'game', game };
     audio.play('match');
     void game.mount();
@@ -170,8 +184,10 @@ class App {
   }
 }
 
+type LobbyArg = Parameters<typeof lobbyScreen>[3];
+
 async function boot() {
-  await loadManifest();
+  if (!OFFLINE) await loadManifest();
   try { await document.fonts.ready; } catch { /* 무시 */ }
   new App(document.getElementById('app')!).start();
 }

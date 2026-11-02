@@ -1,16 +1,20 @@
 /**
- * 한 매치(3판 2선승)의 진행. 판정과 비밀 정보는 모두 여기(서버)에만 있습니다.
+ * 한 매치(3판 2선승)의 진행. 판정과 비밀 정보는 모두 여기에만 있습니다.
+ * 온라인에서는 서버가, AI 대전에서는 브라우저가 이것을 돌립니다.
  * 각 플레이어에게는 viewFor()로 걸러 낸 화면용 상태와, 볼 수 있는 사건만 보냅니다.
  */
-import { WINS_TO_TAKE_MATCH } from '../shared/data';
-import { apply, createRound, eventsFor, forfeit, timeout } from '../shared/engine';
-import { josa } from '../shared/korean';
-import type { MatchInfo, OpponentStatus, ServerMsg } from '../shared/protocol';
-import type { Action, Emitted, Faction, GameState } from '../shared/types';
-import { FACTIONS, other } from '../shared/types';
-import { viewFor } from '../shared/view';
+import { WINS_TO_TAKE_MATCH } from './data';
+import { apply, createRound, eventsFor, forfeit, timeout } from './engine';
+import { josa } from './korean';
+import type { MatchInfo, OpponentStatus, ServerMsg } from './protocol';
+import type { Action, Emitted, Faction, GameState } from './types';
+import { FACTIONS, other } from './types';
+import { viewFor } from './view';
+
+type Timer = ReturnType<typeof setTimeout>;
 
 export interface Timings {
+  /** 0이면 차례 시간 제한이 없다 (AI 대전) */
   turnMs: number;
   roundBreakMs: number;
   graceMs: number;
@@ -35,10 +39,10 @@ export class Match {
   readonly rematchVotes = new Set<Faction>();
 
   private nextFirst: Faction;
-  private turnTimer: NodeJS.Timeout | null = null;
-  private breakTimer: NodeJS.Timeout | null = null;
+  private turnTimer: Timer | null = null;
+  private breakTimer: Timer | null = null;
   private nextAt: number | null = null;
-  private readonly grace: Partial<Record<Faction, { timer: NodeJS.Timeout; until: number }>> = {};
+  private readonly grace: Partial<Record<Faction, { timer: Timer; until: number }>> = {};
   private left = new Set<Faction>();
 
   constructor(
@@ -117,7 +121,7 @@ export class Match {
   private resetTurnTimer() {
     if (this.turnTimer) clearTimeout(this.turnTimer);
     this.turnTimer = null;
-    if (this.phase !== 'playing') { this.deadline = null; return; }
+    if (this.phase !== 'playing' || this.timings.turnMs <= 0) { this.deadline = null; return; }
     this.deadline = Date.now() + this.timings.turnMs;
     this.turnTimer = setTimeout(() => this.onTurnTimeout(), this.timings.turnMs);
   }

@@ -17,7 +17,7 @@ import type { PlayerView, ViewPiece } from '../../shared/view';
 import { audio } from '../audio';
 import { Board, NO_HIGHLIGHTS, type Highlights } from '../board/board';
 import { pieceSvg, uiSvg, type UiIcon } from '../icons';
-import type { Net } from '../net';
+import type { Link } from '../local';
 import { onSettings, saveSettings, settings } from '../settings';
 import { openCodex, openSettings } from '../ui/codex';
 import { $, confirmBox, el, esc, fmtClock, modal, placeNear, roman, toast } from '../ui/dom';
@@ -61,7 +61,7 @@ export class GameScreen {
   private offSettings: () => void;
   private onKey = (e: KeyboardEvent) => this.key(e);
 
-  constructor(host: HTMLElement, private readonly net: Net, private readonly onLobby: () => void) {
+  constructor(host: HTMLElement, private readonly net: Link, private readonly onLobby: () => void) {
     this.root = el('div', 'game');
     this.root.innerHTML = this.layout();
     host.appendChild(this.root);
@@ -212,7 +212,9 @@ export class GameScreen {
       this.board.setPerspective(msg.view.you);
       this.view = msg.view;
       this.match = msg.match;
+      this.deadline = msg.deadline;
       this.board.sync(msg.view);
+      this.renderAll();
     }
     this.match = msg.match;
     this.deadline = msg.deadline;
