@@ -102,7 +102,7 @@ class App {
           close();
           // 새 이름으로 다시 인사한다 (같은 토큰)
           this.net.connect(name);
-          this.net.retryNow();
+          this.net.reconnect();
           this.showLobby();
         });
       },

@@ -11,7 +11,7 @@ import {
   blessTargets, bribeOpen, bribeOptions, cardChoices, cardProblem, execRange, execTargets, interrogateTargets,
   isMyTurn, pieceAt, pieceById, reachable, royalEffect, shadowCells,
 } from '../../shared/rules';
-import type { Action, CardId, Cell, Faction, GameEvent, NewsItem, Orders } from '../../shared/types';
+import type { Action, CardId, Faction, GameEvent, NewsItem, Orders } from '../../shared/types';
 import { other } from '../../shared/types';
 import type { PlayerView, ViewPiece } from '../../shared/view';
 import { audio } from '../audio';
@@ -696,11 +696,7 @@ export class GameScreen {
   }
 
   private outside = (e: PointerEvent) => {
-    if (this.popover && !this.popover.contains(e.target as Node)) {
-      const onCanvas = (e.target as HTMLElement)?.tagName === 'CANVAS';
-      this.closePopover();
-      if (onCanvas) return;
-    }
+    if (this.popover && !this.popover.contains(e.target as Node)) this.closePopover();
   };
 
   private closePopover() {
@@ -1093,4 +1089,3 @@ export class GameScreen {
   }
 }
 
-export type { Cell };

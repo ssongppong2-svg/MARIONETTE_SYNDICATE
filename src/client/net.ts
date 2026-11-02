@@ -101,6 +101,16 @@ export class Net {
   /** 서버 시계 기준 지금 */
   now(): number { return Date.now() + this.clockOffset; }
 
+  /** 같은 토큰으로 다시 인사한다 (이름을 바꿨을 때) */
+  reconnect() {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.retry = 0;
+      this.ws.close(1000, 'rename');
+    } else {
+      this.retryNow();
+    }
+  }
+
   retryNow() {
     if (this.timer) clearTimeout(this.timer);
     this.retry = 0;
